@@ -32,6 +32,7 @@ export default function ProductosPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [form, setForm] = useState({
         id_producto: null as number | null,
+        categoria: "Pastel",
         nombre: "",
         descripcion: "",
         precio: "",
@@ -53,7 +54,7 @@ export default function ProductosPage() {
     }, [showInactivos]);
 
     const resetForm = () => {
-        setForm({ id_producto: null, nombre: "", descripcion: "", precio: "", activo: true });
+        setForm({ id_producto: null, categoria: "Pastel", nombre: "", descripcion: "", precio: "", activo: true });
         setError("");
     };
 
@@ -68,8 +69,13 @@ export default function ProductosPage() {
         setSaving(true);
 
         try {
+            const baseNombre = form.nombre.trim();
+            const fullNombre = form.categoria && form.categoria !== "Otro"
+                ? `${form.categoria} - ${baseNombre}`
+                : baseNombre;
+
             const payload = {
-                nombre: form.nombre.trim(),
+                nombre: fullNombre,
                 descripcion: form.descripcion.trim(),
                 precio: Number(form.precio),
                 activo: form.activo,
@@ -101,9 +107,14 @@ export default function ProductosPage() {
     };
 
     const handleEdit = (prod: Producto) => {
+        const parts = (prod.nombre || "").split(" - ");
+        const categoria = parts.length > 1 ? parts[0] : "Otro";
+        const nombre = parts.length > 1 ? parts.slice(1).join(" - ") : (prod.nombre || "");
+
         setForm({
             id_producto: prod.id_producto,
-            nombre: prod.nombre || "",
+            categoria,
+            nombre,
             descripcion: prod.descripcion || "",
             precio: String(prod.precio || ""),
             activo: prod.activo,
@@ -160,42 +171,79 @@ export default function ProductosPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {productos.map((prod, i) => (
-                    <div key={prod.id_producto} className="stat-card animate-in" style={{ animationDelay: `${i * 80}ms` }}>
-                        <div className="flex items-start justify-between mb-4">
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/10 flex items-center justify-center text-2xl">
-                                {getIcon(prod.nombre)}
+            {(() => {
+                const categorize = (nombre: string) => {
+                    const parts = nombre.split(" - ");
+                    return parts.length > 1 ? parts[0] : "Otros";
+                };
+                const displayName = (nombre: string) => {
+                    const parts = nombre.split(" - ");
+                    return parts.length > 1 ? parts.slice(1).join(" - ") : nombre;
+                };
+
+                const sections = [
+                    { key: "Pastel", label: "Pasteles" },
+                    { key: "Sandwich", label: "Sandwiches" },
+                    { key: "Arepa", label: "Arepas" },
+                    { key: "Jugo", label: "Jugos naturales" },
+                    { key: "Bebida", label: "Bebidas frias" },
+                    { key: "Otros", label: "Otros" },
+                ];
+
+                const grouped = sections.map((section) => ({
+                    ...section,
+                    items: productos.filter((p) => categorize(p.nombre || "") === section.key),
+                })).filter((section) => section.items.length > 0);
+
+                return (
+                    <div className="space-y-8">
+                        {grouped.map((section, sectionIndex) => (
+                            <div key={section.key} className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-xl font-semibold text-surface-50">{section.label}</h2>
+                                    <span className="text-xs text-surface-500">{section.items.length} items</span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {section.items.map((prod, i) => (
+                                        <div key={prod.id_producto} className="stat-card animate-in" style={{ animationDelay: `${(sectionIndex * 6 + i) * 50}ms` }}>
+                                            <div className="flex items-start justify-between mb-4">
+                                                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500/20 to-primary-600/10 flex items-center justify-center text-2xl">
+                                                    {getIcon(prod.nombre)}
+                                                </div>
+                                                <span className={`badge ${prod.activo ? "badge-pagado" : "badge-cancelado"}`}>
+                                                    {prod.activo ? "Activo" : "Inactivo"}
+                                                </span>
+                                            </div>
+                                            <h3 className="text-lg font-bold text-surface-100 mb-1">{displayName(prod.nombre)}</h3>
+                                            <p className="text-sm text-surface-400 mb-4 line-clamp-2">{prod.descripcion || "Sin descripcion"}</p>
+                                            <div className="flex items-center justify-between pt-3 border-t border-surface-800/30">
+                                                <span className="text-2xl font-bold text-primary-400">{formatCOP(parseFloat(prod.precio))}</span>
+                                                <span className="text-xs text-surface-600">
+                                                    Desde {new Date(prod.created_at).toLocaleDateString("es-CO", { month: "short", year: "numeric" })}
+                                                </span>
+                                            </div>
+                                            <div className="mt-4 flex items-center gap-2">
+                                                <button
+                                                    onClick={() => handleEdit(prod)}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-primary-600 hover:bg-primary-500/10"
+                                                >
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(prod)}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-500/10"
+                                                >
+                                                    Desactivar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                            <span className={`badge ${prod.activo ? "badge-pagado" : "badge-cancelado"}`}>
-                                {prod.activo ? "Activo" : "Inactivo"}
-                            </span>
-                        </div>
-                        <h3 className="text-lg font-bold text-surface-100 mb-1">{prod.nombre}</h3>
-                        <p className="text-sm text-surface-400 mb-4 line-clamp-2">{prod.descripcion}</p>
-                        <div className="flex items-center justify-between pt-3 border-t border-surface-800/30">
-                            <span className="text-2xl font-bold text-primary-400">{formatCOP(parseFloat(prod.precio))}</span>
-                            <span className="text-xs text-surface-600">
-                                Desde {new Date(prod.created_at).toLocaleDateString("es-CO", { month: "short", year: "numeric" })}
-                            </span>
-                        </div>
-                        <div className="mt-4 flex items-center gap-2">
-                            <button
-                                onClick={() => handleEdit(prod)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-primary-600 hover:bg-primary-500/10"
-                            >
-                                Editar
-                            </button>
-                            <button
-                                onClick={() => handleDelete(prod)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-500/10"
-                            >
-                                Desactivar
-                            </button>
-                        </div>
+                        ))}
                     </div>
-                ))}
-            </div>
+                );
+            })()}
 
             {modalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -221,6 +269,21 @@ export default function ProductosPage() {
                         </div>
 
                         <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-surface-400 mb-2">Categoria</label>
+                                <select
+                                    className="input-field"
+                                    value={form.categoria}
+                                    onChange={(e) => setForm({ ...form, categoria: e.target.value })}
+                                >
+                                    <option value="Pastel">Pastel</option>
+                                    <option value="Sandwich">Sandwich</option>
+                                    <option value="Arepa">Arepa</option>
+                                    <option value="Jugo">Jugo</option>
+                                    <option value="Bebida">Bebida</option>
+                                    <option value="Otro">Otro</option>
+                                </select>
+                            </div>
                             <div>
                                 <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-surface-400 mb-2">Nombre</label>
                                 <input
