@@ -94,21 +94,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 className={`fixed top-0 left-0 h-full z-40 transition-all duration-300 ${sidebarOpen ? "w-64" : "w-20"
                     }`}
                 style={{
-                    background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(15,23,42,0.95) 100%)",
-                    borderRight: "1px solid rgba(148,163,184,0.08)",
+                    background: "linear-gradient(180deg, rgba(255,250,245,0.98) 0%, rgba(250,244,237,0.95) 100%)",
+                    borderRight: "1px solid rgba(199,180,167,0.35)",
                 }}
             >
                 {/* Logo */}
                 <div className="flex items-center gap-3 px-5 h-16 border-b border-surface-800/50">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/20">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                            <path d="M12 2C6.48 2 2 6 2 10c0 2.5 1.5 5 4 6.5V22l4-3h2c5.52 0 10-4 10-8s-4.48-8-10-8z" />
-                        </svg>
-                    </div>
                     {sidebarOpen && (
                         <div className="animate-in">
-                            <h2 className="text-sm font-bold text-surface-100">Pasteles</h2>
-                            <p className="text-[10px] text-primary-400 font-medium tracking-wider uppercase">Admin Panel</p>
+                            <h2 className="text-sm font-bold text-surface-50">Juan Pastel</h2>
+                            <p className="text-[10px] text-primary-600 font-medium tracking-wider uppercase">Admin Panel</p>
                         </div>
                     )}
                 </div>
@@ -136,16 +131,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {sidebarOpen && (
                     <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-800/50">
                         <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-surface-700 flex items-center justify-center text-primary-400 font-bold text-sm">
+                            <div className="w-9 h-9 rounded-lg bg-surface-800 flex items-center justify-center text-primary-600 font-bold text-sm">
                                 {user.nombre.charAt(0).toUpperCase()}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-surface-200 truncate">{user.nombre}</p>
-                                <p className="text-[11px] text-surface-500 truncate">{user.cargo}</p>
+                                <p className="text-sm font-medium text-surface-50 truncate">{user.nombre}</p>
+                                <p className="text-[11px] text-surface-400 truncate">{user.cargo}</p>
                             </div>
                             <button
                                 onClick={handleLogout}
-                                className="p-2 rounded-lg hover:bg-red-500/10 text-surface-500 hover:text-red-400 transition-colors"
+                                className="p-2 rounded-lg hover:bg-red-500/10 text-surface-400 hover:text-red-400 transition-colors"
                                 title="Cerrar sesión"
                             >
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -162,7 +157,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {/* Main Content */}
             <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-20"}`}>
                 {/* Top Bar */}
-                <header className="sticky top-0 z-30 h-16 flex items-center justify-between px-6 border-b border-surface-800/50" style={{ background: "rgba(2,6,23,0.8)", backdropFilter: "blur(12px)" }}>
+                <header className="sticky top-0 z-30 h-16 flex items-center justify-between px-6 border-b border-surface-800/50" style={{ background: "rgba(255,250,245,0.85)", backdropFilter: "blur(12px)" }}>
                     <button
                         onClick={() => setSidebarOpen(!sidebarOpen)}
                         className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 transition-colors"
@@ -175,7 +170,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </button>
 
                     <div className="flex items-center gap-4">
-                        <span className="text-xs text-surface-500">
+                        <span className="text-xs text-surface-400">
                             {new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
                         </span>
                         <div className="badge badge-pagado text-[11px]">
