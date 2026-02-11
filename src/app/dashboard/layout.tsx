@@ -1,0 +1,194 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+
+interface User {
+    nombre: string;
+    cargo: string;
+    rol: string;
+}
+
+const NAV_ITEMS = [
+    {
+        href: "/dashboard",
+        label: "Dashboard",
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+        ),
+    },
+    {
+        href: "/dashboard/pedidos",
+        label: "Pedidos",
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                <rect x="9" y="3" width="6" height="4" rx="1" />
+                <path d="M9 14l2 2 4-4" />
+            </svg>
+        ),
+    },
+    {
+        href: "/dashboard/productos",
+        label: "Productos",
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m7.5 4.27 9 5.15" />
+                <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                <path d="m3.3 7 8.7 5 8.7-5" />
+                <path d="M12 22V12" />
+            </svg>
+        ),
+    },
+    {
+        href: "/dashboard/sedes",
+        label: "Sedes",
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                <circle cx="12" cy="10" r="3" />
+            </svg>
+        ),
+    },
+];
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+    const [user, setUser] = useState<User | null>(null);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const router = useRouter();
+    const pathname = usePathname();
+
+    useEffect(() => {
+        const token = localStorage.getItem("token");
+        const userData = localStorage.getItem("user");
+        if (!token || !userData) {
+            router.push("/login");
+            return;
+        }
+        setUser(JSON.parse(userData));
+    }, [router]);
+
+    const handleLogout = () => {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        router.push("/login");
+    };
+
+    if (!user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="loading-skeleton w-12 h-12 rounded-full" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen flex">
+            {/* Sidebar */}
+            <aside
+                className={`fixed top-0 left-0 h-full z-40 transition-all duration-300 ${sidebarOpen ? "w-64" : "w-20"
+                    }`}
+                style={{
+                    background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(15,23,42,0.95) 100%)",
+                    borderRight: "1px solid rgba(148,163,184,0.08)",
+                }}
+            >
+                {/* Logo */}
+                <div className="flex items-center gap-3 px-5 h-16 border-b border-surface-800/50">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/20">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                            <path d="M12 2C6.48 2 2 6 2 10c0 2.5 1.5 5 4 6.5V22l4-3h2c5.52 0 10-4 10-8s-4.48-8-10-8z" />
+                        </svg>
+                    </div>
+                    {sidebarOpen && (
+                        <div className="animate-in">
+                            <h2 className="text-sm font-bold text-surface-100">Pasteles</h2>
+                            <p className="text-[10px] text-primary-400 font-medium tracking-wider uppercase">Admin Panel</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Nav */}
+                <nav className="p-3 space-y-1 mt-2">
+                    {NAV_ITEMS.map((item) => {
+                        const isActive = pathname === item.href;
+                        return (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className={`sidebar-link ${isActive ? "active" : ""} ${!sidebarOpen ? "justify-center px-0" : ""
+                                    }`}
+                                title={item.label}
+                            >
+                                {item.icon}
+                                {sidebarOpen && <span>{item.label}</span>}
+                            </Link>
+                        );
+                    })}
+                </nav>
+
+                {/* User section at bottom */}
+                {sidebarOpen && (
+                    <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-surface-800/50">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-surface-700 flex items-center justify-center text-primary-400 font-bold text-sm">
+                                {user.nombre.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-surface-200 truncate">{user.nombre}</p>
+                                <p className="text-[11px] text-surface-500 truncate">{user.cargo}</p>
+                            </div>
+                            <button
+                                onClick={handleLogout}
+                                className="p-2 rounded-lg hover:bg-red-500/10 text-surface-500 hover:text-red-400 transition-colors"
+                                title="Cerrar sesión"
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                    <polyline points="16 17 21 12 16 7" />
+                                    <line x1="21" y1="12" x2="9" y2="12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </aside>
+
+            {/* Main Content */}
+            <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-20"}`}>
+                {/* Top Bar */}
+                <header className="sticky top-0 z-30 h-16 flex items-center justify-between px-6 border-b border-surface-800/50" style={{ background: "rgba(2,6,23,0.8)", backdropFilter: "blur(12px)" }}>
+                    <button
+                        onClick={() => setSidebarOpen(!sidebarOpen)}
+                        className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 transition-colors"
+                    >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="3" y1="6" x2="21" y2="6" />
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                            <line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                    </button>
+
+                    <div className="flex items-center gap-4">
+                        <span className="text-xs text-surface-500">
+                            {new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                        </span>
+                        <div className="badge badge-pagado text-[11px]">
+                            {user.rol}
+                        </div>
+                    </div>
+                </header>
+
+                {/* Page Content */}
+                <div className="p-6">
+                    {children}
+                </div>
+            </main>
+        </div>
+    );
+}
