@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 interface Pedido {
     id_pedido: number;
@@ -34,6 +34,8 @@ interface PedidoDetalle {
     }>;
 }
 
+type PedidoDetalleResponse = PedidoDetalle | { error: string };
+
 interface Sede {
     id_sede: number;
     nombre: string;
@@ -46,10 +48,16 @@ interface Pagination {
     totalPages: number;
 }
 
+interface CancelAlert {
+    id: number;
+    ticket: string;
+    cliente: string;
+}
+
 const formatCOP = (val: number) =>
     new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(val);
 
-const ESTADOS = ["pendiente", "pagado", "entregado", "cancelado"];
+const ESTADOS = ["pendiente", "enviado", "pagado", "entregado", "cancelado"];
 
 export default function PedidosPage() {
     const [pedidos, setPedidos] = useState<Pedido[]>([]);
@@ -61,9 +69,47 @@ export default function PedidosPage() {
     const [detalle, setDetalle] = useState<PedidoDetalle | null>(null);
     const [detalleOpen, setDetalleOpen] = useState(false);
     const [updatingEstado, setUpdatingEstado] = useState<number | null>(null);
+    const [menuAccionesAbierto, setMenuAccionesAbierto] = useState<number | null>(null);
+    const [cancelAlert, setCancelAlert] = useState<CancelAlert | null>(null);
+    const pedidosEstadoPrevioRef = useRef<Map<number, string>>(new Map());
+    const inicializadoRef = useRef(false);
 
-    const fetchPedidos = useCallback(async (page = 1) => {
-        setLoading(true);
+    const reproducirAlertaCancelacion = useCallback(() => {
+        const audioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!audioContextClass) return;
+
+        const context = new audioContextClass();
+        const gain = context.createGain();
+        gain.connect(context.destination);
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+
+        const beep1 = context.createOscillator();
+        beep1.type = "sine";
+        beep1.frequency.setValueAtTime(880, context.currentTime);
+        beep1.connect(gain);
+
+        const beep2 = context.createOscillator();
+        beep2.type = "sine";
+        beep2.frequency.setValueAtTime(660, context.currentTime + 0.15);
+        beep2.connect(gain);
+
+        gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.3);
+
+        beep1.start(context.currentTime);
+        beep1.stop(context.currentTime + 0.15);
+        beep2.start(context.currentTime + 0.15);
+        beep2.stop(context.currentTime + 0.3);
+
+        setTimeout(() => {
+            context.close().catch(() => { });
+        }, 350);
+    }, []);
+
+    const fetchPedidos = useCallback(async (page = 1, options?: { silent?: boolean; detectarCancelados?: boolean }) => {
+        const silent = options?.silent ?? false;
+        const detectarCancelados = options?.detectarCancelados ?? false;
+        if (!silent) setLoading(true);
         const params = new URLSearchParams();
         params.set("page", String(page));
         if (filtroSede) params.set("sede", filtroSede);
@@ -72,14 +118,35 @@ export default function PedidosPage() {
         try {
             const res = await fetch(`/api/pedidos?${params}`);
             const data = await res.json();
-            setPedidos(data.pedidos || []);
+            const pedidosNuevos: Pedido[] = data.pedidos || [];
+
+            if (detectarCancelados && inicializadoRef.current) {
+                const canceladosNuevos = pedidosNuevos.find((pedido) => {
+                    const estadoPrevio = pedidosEstadoPrevioRef.current.get(pedido.id_pedido);
+                    return estadoPrevio && estadoPrevio !== "cancelado" && pedido.estado === "cancelado";
+                });
+
+                if (canceladosNuevos) {
+                    setCancelAlert({
+                        id: canceladosNuevos.id_pedido,
+                        ticket: canceladosNuevos.numero_ticket || `#${canceladosNuevos.id_pedido}`,
+                        cliente: canceladosNuevos.cliente_nombre || "Sin cliente",
+                    });
+                    reproducirAlertaCancelacion();
+                }
+            }
+
+            pedidosEstadoPrevioRef.current = new Map(pedidosNuevos.map((pedido) => [pedido.id_pedido, pedido.estado]));
+            if (!inicializadoRef.current) inicializadoRef.current = true;
+
+            setPedidos(pedidosNuevos);
             setPagination(data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });
         } catch (err) {
             console.error(err);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
-    }, [filtroSede, filtroEstado]);
+    }, [filtroSede, filtroEstado, reproducirAlertaCancelacion]);
 
     useEffect(() => {
         fetch("/api/sedes").then(r => r.json()).then(setSedes).catch(() => { });
@@ -89,14 +156,56 @@ export default function PedidosPage() {
         fetchPedidos(1);
     }, [fetchPedidos]);
 
+    useEffect(() => {
+        if (!cancelAlert) return;
+        const timeout = setTimeout(() => setCancelAlert(null), 5000);
+        return () => clearTimeout(timeout);
+    }, [cancelAlert]);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            fetchPedidos(pagination.page, { silent: true, detectarCancelados: true });
+        }, 10000);
+
+        return () => clearInterval(interval);
+    }, [fetchPedidos, pagination.page]);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as Element | null;
+            if (!target?.closest("[data-acciones-container='true']")) {
+                setMenuAccionesAbierto(null);
+            }
+        };
+
+        document.addEventListener("click", handleClickOutside);
+        return () => document.removeEventListener("click", handleClickOutside);
+    }, []);
+
     const openDetalle = async (id: number) => {
         try {
             const res = await fetch(`/api/pedidos/${id}`);
-            const data = await res.json();
+            let data: PedidoDetalleResponse = { error: "Respuesta inválida" };
+            try {
+                data = await res.json();
+            } catch {
+                setDetalle(null);
+                setDetalleOpen(false);
+                return;
+            }
+
+            if (!res.ok || !("pedido" in data)) {
+                setDetalle(null);
+                setDetalleOpen(false);
+                return;
+            }
+
             setDetalle(data);
             setDetalleOpen(true);
         } catch (err) {
-            console.error(err);
+            void err;
+            setDetalle(null);
+            setDetalleOpen(false);
         }
     };
 
@@ -110,7 +219,8 @@ export default function PedidosPage() {
             });
             if (res.ok) {
                 fetchPedidos(pagination.page);
-                if (detalle && detalle.pedido.id_pedido === id) {
+                setMenuAccionesAbierto(null);
+                if (detalle?.pedido && detalle.pedido.id_pedido === id) {
                     setDetalle({
                         ...detalle,
                         pedido: { ...detalle.pedido, estado: nuevoEstado },
@@ -214,34 +324,51 @@ export default function PedidosPage() {
                                         </td>
                                         <td className="py-3.5 px-5 text-sm text-surface-400">{p.sede_nombre || "—"}</td>
                                         <td className="py-3.5 px-5">
-                                            <select
-                                                value={p.estado}
-                                                onChange={(e) => cambiarEstado(p.id_pedido, e.target.value)}
-                                                disabled={updatingEstado === p.id_pedido}
-                                                className={`badge badge-${p.estado} cursor-pointer border-0 outline-none text-xs font-semibold`}
-                                                style={{ background: "transparent" }}
-                                            >
-                                                {ESTADOS.map((e) => (
-                                                    <option key={e} value={e}>{e}</option>
-                                                ))}
-                                            </select>
-                                            <span className={`badge badge-${p.estado} ml-1`}>{p.estado}</span>
+                                            <span className={`badge badge-${p.estado}`}>{p.estado}</span>
                                         </td>
                                         <td className="py-3.5 px-5 text-sm font-semibold text-surface-200 text-right">{formatCOP(parseFloat(p.total))}</td>
                                         <td className="py-3.5 px-5 text-sm text-surface-500 text-right">
                                             {new Date(p.fecha).toLocaleDateString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                                         </td>
                                         <td className="py-3.5 px-5 text-center">
-                                            <button
-                                                onClick={() => openDetalle(p.id_pedido)}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10 transition-colors"
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                                    <circle cx="12" cy="12" r="3" />
-                                                </svg>
-                                                Ver Detalle
-                                            </button>
+                                            <div className="relative inline-block" data-acciones-container="true">
+                                                <button
+                                                    onClick={() => setMenuAccionesAbierto(menuAccionesAbierto === p.id_pedido ? null : p.id_pedido)}
+                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-surface-500 hover:text-primary-500 hover:bg-primary-500/10 transition-colors"
+                                                    aria-label="Abrir acciones"
+                                                >
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                        <circle cx="12" cy="5" r="1.8" />
+                                                        <circle cx="12" cy="12" r="1.8" />
+                                                        <circle cx="12" cy="19" r="1.8" />
+                                                    </svg>
+                                                </button>
+
+                                                {menuAccionesAbierto === p.id_pedido && (
+                                                    <div className="absolute right-0 mt-1 w-44 glass-card-light p-1.5 z-20 border border-surface-800/40">
+                                                        <button
+                                                            onClick={() => {
+                                                                openDetalle(p.id_pedido);
+                                                                setMenuAccionesAbierto(null);
+                                                            }}
+                                                            className="w-full text-left px-3 py-2 rounded-md text-xs text-surface-300 hover:bg-primary-500/10 transition-colors"
+                                                        >
+                                                            Ver detalle
+                                                        </button>
+
+                                                        {ESTADOS.map((estado) => (
+                                                            <button
+                                                                key={estado}
+                                                                onClick={() => cambiarEstado(p.id_pedido, estado)}
+                                                                disabled={updatingEstado === p.id_pedido || estado === p.estado}
+                                                                className="w-full text-left px-3 py-2 rounded-md text-xs text-surface-300 hover:bg-primary-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                            >
+                                                                Marcar como {estado}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -277,7 +404,7 @@ export default function PedidosPage() {
             </div>
 
             {/* Detail Slide-Over */}
-            {detalleOpen && detalle && (
+            {detalleOpen && detalle?.pedido && (
                 <div className="fixed inset-0 z-50 flex justify-end">
                     <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDetalleOpen(false)} />
                     <div className="relative w-full max-w-lg bg-surface-900 border-l border-surface-800/50 overflow-y-auto animate-in" style={{ animation: "slideIn 0.3s ease" }}>
@@ -302,17 +429,8 @@ export default function PedidosPage() {
 
                         <div className="p-6 space-y-6">
                             {/* Status + Info */}
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center">
                                 <span className={`badge badge-${detalle.pedido.estado} text-sm`}>{detalle.pedido.estado}</span>
-                                <select
-                                    value={detalle.pedido.estado}
-                                    onChange={(e) => cambiarEstado(detalle.pedido.id_pedido, e.target.value)}
-                                    className="select-field text-xs"
-                                >
-                                    {ESTADOS.map((e) => (
-                                        <option key={e} value={e}>{e}</option>
-                                    ))}
-                                </select>
                             </div>
 
                             {/* Cliente info */}
@@ -377,6 +495,30 @@ export default function PedidosPage() {
                                 <div className="flex justify-between"><span>Empleado:</span><span className="text-surface-300">{detalle.pedido.empleado_nombre || "—"}</span></div>
                                 <div className="flex justify-between"><span>Fecha:</span><span className="text-surface-300">{new Date(detalle.pedido.fecha).toLocaleString("es-CO")}</span></div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {cancelAlert && (
+                <div className="fixed top-6 right-6 z-[60] max-w-sm w-full">
+                    <div className="glass-card border border-red-500/40 p-4 shadow-xl animate-in">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-red-400">Pedido cancelado</p>
+                                <p className="text-sm font-semibold text-surface-100 mt-1">{cancelAlert.ticket}</p>
+                                <p className="text-xs text-surface-400 mt-1">Cliente: {cancelAlert.cliente}</p>
+                            </div>
+                            <button
+                                onClick={() => setCancelAlert(null)}
+                                className="text-surface-400 hover:text-surface-200 transition-colors"
+                                aria-label="Cerrar alerta"
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                            </button>
                         </div>
                     </div>
                 </div>

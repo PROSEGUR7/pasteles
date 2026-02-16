@@ -10,7 +10,7 @@ export async function GET(
         const pedidoId = parseInt(id);
 
         const pedido = await pool.query(
-            `SELECT p.*, c.nombre as cliente_nombre, c.telefono as cliente_telefono, c.email as cliente_email,
+            `SELECT p.*, c.nombre as cliente_nombre, c.telefono as cliente_telefono, NULL::text as cliente_email,
               s.nombre as sede_nombre, s.direccion as sede_direccion,
               e.nombre as empleado_nombre
        FROM pedidos p

@@ -11,7 +11,7 @@ export async function PATCH(
         const pedidoId = parseInt(id);
         const { estado } = await request.json();
 
-        const validEstados = ['pendiente', 'pagado', 'cancelado', 'entregado'];
+        const validEstados = ['pendiente', 'enviado', 'pagado', 'cancelado', 'entregado'];
         if (!validEstados.includes(estado)) {
             return NextResponse.json(
                 { error: `Estado inválido. Opciones: ${validEstados.join(', ')}` },
