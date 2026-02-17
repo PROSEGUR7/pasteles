@@ -126,11 +126,17 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const sent = await sendMetaMessage(
+        const senderType = body.senderType || body.remitente || body.sender || "ia";
+        const source = body.source || "n8n";
+
+        let resolvedType: "text" | "image" | "audio" = type;
+        let warning: string | null = null;
+
+        const sendPayload =
             type === "image"
                 ? {
                       to: waId,
-                      type: "image",
+                      type: "image" as const,
                       imageUrl,
                       mediaId: body.mediaId,
                       caption: body.caption || message || undefined,
@@ -138,21 +144,42 @@ export async function POST(request: NextRequest) {
                 : type === "audio"
                   ? {
                         to: waId,
-                        type: "audio",
+                        type: "audio" as const,
                         audioUrl: body.audioUrl || body.mediaUrl,
                         mediaId: body.mediaId,
                     }
                   : {
                         to: waId,
-                        type: "text",
+                        type: "text" as const,
                         message,
-                    }
-        );
+                    };
+
+        let sent;
+        try {
+            sent = await sendMetaMessage(sendPayload);
+        } catch (sendError) {
+            const sendErrorMessage = sendError instanceof Error ? sendError.message : String(sendError);
+            const isImagePermissionError =
+                type === "image" &&
+                /\(#10\)|does not have permission for this action/i.test(sendErrorMessage);
+
+            if (isImagePermissionError && message) {
+                sent = await sendMetaMessage({
+                    to: waId,
+                    type: "text",
+                    message,
+                });
+                resolvedType = "text";
+                warning = "Meta rechazó la imagen por permisos (#10). Se envió solo texto.";
+            } else {
+                throw sendError;
+            }
+        }
 
         const previewBody =
-            type === "image"
+            resolvedType === "image"
                 ? body.caption?.trim() || message || "📷 Imagen"
-                : type === "audio"
+                : resolvedType === "audio"
                   ? "🎵 Audio"
                   : message;
 
@@ -161,19 +188,20 @@ export async function POST(request: NextRequest) {
             nombre: body.nombre,
             body: previewBody,
             messageId: sent.messageId,
-            mediaType: type === "image" || type === "audio" ? type : undefined,
-            mediaId: body.mediaId,
-            mediaUrl: type === "image" ? imageUrl || undefined : undefined,
-            caption: type === "image" ? (body.caption || message || undefined) : undefined,
-            senderType: body.senderType || body.remitente || body.sender || "ia",
-            source: body.source || "n8n",
+            mediaType: resolvedType === "image" || resolvedType === "audio" ? resolvedType : undefined,
+            mediaId: resolvedType === "image" || resolvedType === "audio" ? body.mediaId : undefined,
+            mediaUrl: resolvedType === "image" ? imageUrl || undefined : undefined,
+            caption: resolvedType === "image" ? (body.caption || message || undefined) : undefined,
+            senderType,
+            source,
         });
 
         return NextResponse.json({
             ok: true,
             to: waId,
-            type,
+            type: resolvedType,
             messageId: sent.messageId || null,
+            warning,
         });
     } catch (error) {
         console.error("[Meta Send] Error:", error);
