@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type FiltroCanal = "Todos" | "WhatsApp" | "Instagram" | "Web";
+type FiltroCanal = "Todos" | "No leídos";
 
 interface ConversationSummary {
     waId: string;
@@ -27,7 +27,7 @@ interface ConversationMessage {
     source: "meta" | "n8n";
 }
 
-const FILTROS: FiltroCanal[] = ["Todos", "WhatsApp", "Instagram", "Web"];
+const FILTROS: FiltroCanal[] = ["Todos", "No leídos"];
 
 function formatRelative(dateInput?: string | null) {
     if (!dateInput) return "";
@@ -93,8 +93,7 @@ export default function ConversacionesPage() {
         async (silent = false) => {
             try {
                 if (!silent) setLoadingConvs(true);
-                const query = filtro !== "Todos" ? `?canal=${encodeURIComponent(filtro)}` : "";
-                const res = await fetch(`/api/conversaciones${query}`, { cache: "no-store" });
+                const res = await fetch("/api/conversaciones", { cache: "no-store" });
                 if (!res.ok) {
                     let backendMessage = "No pudimos cargar las conversaciones";
                     try {
@@ -574,14 +573,21 @@ export default function ConversacionesPage() {
     }, [selectedImagePreviewUrl, imagePreviewByMessageId]);
 
     const conversacionesFiltradas = useMemo(() => {
+        let result = conversaciones;
+
+        if (filtro === "No leídos") {
+            result = result.filter((c) => c.unreadCount > 0);
+        }
+
         const term = busqueda.trim().toLowerCase();
-        if (!term) return conversaciones;
-        return conversaciones.filter(
+        if (!term) return result;
+
+        return result.filter(
             (c) =>
                 c.nombre.toLowerCase().includes(term) ||
                 (c.lastMessage?.toLowerCase().includes(term) ?? false)
         );
-    }, [busqueda, conversaciones]);
+    }, [busqueda, conversaciones, filtro]);
 
     return (
         <div className="h-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden min-h-0 pr-1 pt-1">

@@ -29,6 +29,7 @@ export default function ClientesPage() {
     const [clientes, setClientes] = useState<ClienteResumen[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [savingId, setSavingId] = useState<number | null>(null);
 
     const fetchClientes = async () => {
         try {
@@ -62,6 +63,68 @@ export default function ClientesPage() {
     useEffect(() => {
         fetchClientes();
     }, []);
+
+    const handleEditar = async (cliente: ClienteResumen) => {
+        const nombreActual = cliente.nombre || "";
+        const telefonoActual = cliente.telefono || "";
+
+        const nuevoNombre = window.prompt("Editar nombre", nombreActual);
+        if (nuevoNombre === null) return;
+
+        const nuevoTelefono = window.prompt("Editar teléfono", telefonoActual);
+        if (nuevoTelefono === null) return;
+
+        try {
+            setError(null);
+            setSavingId(cliente.id);
+            const res = await fetch("/api/clientes", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: cliente.id,
+                    nombre: nuevoNombre,
+                    telefono: nuevoTelefono,
+                }),
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(typeof data?.error === "string" ? data.error : "No se pudo editar");
+            }
+
+            await fetchClientes();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "No se pudo editar el cliente");
+        } finally {
+            setSavingId(null);
+        }
+    };
+
+    const handleEliminar = async (cliente: ClienteResumen) => {
+        const ok = window.confirm(`¿Eliminar a ${cliente.nombre}?`);
+        if (!ok) return;
+
+        try {
+            setError(null);
+            setSavingId(cliente.id);
+            const res = await fetch("/api/clientes", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: cliente.id }),
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(typeof data?.error === "string" ? data.error : "No se pudo eliminar");
+            }
+
+            await fetchClientes();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "No se pudo eliminar el cliente");
+        } finally {
+            setSavingId(null);
+        }
+    };
 
     return (
         <div className="space-y-6 animate-in">
@@ -104,6 +167,7 @@ export default function ClientesPage() {
                                     <th className="text-left font-medium px-5 py-3">Pedidos</th>
                                     <th className="text-left font-medium px-5 py-3">Último pedido</th>
                                     <th className="text-right font-medium px-5 py-3">Estado</th>
+                                    <th className="text-right font-medium px-5 py-3">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -125,6 +189,24 @@ export default function ClientesPage() {
                                                     ? `${cliente.pedidosCancelados} cancelados`
                                                     : "Sin cancelaciones"}
                                             </span>
+                                        </td>
+                                        <td className="px-5 py-3 text-right">
+                                            <div className="inline-flex gap-2">
+                                                <button
+                                                    onClick={() => handleEditar(cliente)}
+                                                    disabled={savingId === cliente.id}
+                                                    className="px-2.5 py-1 rounded-md border border-surface-800/30 text-[11px] text-surface-400 hover:text-surface-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEliminar(cliente)}
+                                                    disabled={savingId === cliente.id}
+                                                    className="px-2.5 py-1 rounded-md border border-primary-500/40 text-[11px] text-primary-600 hover:text-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    Eliminar
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
