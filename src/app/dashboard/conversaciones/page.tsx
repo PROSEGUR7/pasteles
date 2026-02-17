@@ -557,22 +557,23 @@ export default function ConversacionesPage() {
                 stream.getTracks().forEach((track) => track.stop());
                 mediaStreamRef.current = null;
 
-                const finalType = recorder.mimeType || supportedMime || "audio/webm";
-                const blob = new Blob(chunks, { type: finalType });
-                const extension = finalType.includes("ogg")
+                const recorderMimeType = recorder.mimeType || supportedMime || "audio/webm";
+                const normalizedMimeType = recorderMimeType.split(";")[0]?.trim() || recorderMimeType;
+                const blob = new Blob(chunks, { type: normalizedMimeType });
+                const extension = normalizedMimeType.includes("ogg")
                     ? "ogg"
-                    : finalType.includes("mp4")
+                    : normalizedMimeType.includes("mp4")
                         ? "m4a"
-                        : finalType.includes("mpeg")
+                        : normalizedMimeType.includes("mpeg")
                             ? "mp3"
-                            : finalType.includes("webm")
+                            : normalizedMimeType.includes("webm")
                                 ? "webm"
-                            : finalType.includes("amr")
+                            : normalizedMimeType.includes("amr")
                                 ? "amr"
-                                : finalType.includes("aac")
+                                : normalizedMimeType.includes("aac")
                                     ? "aac"
                                     : "opus";
-                const file = new File([blob], `audio-${Date.now()}.${extension}`, { type: finalType });
+                const file = new File([blob], `audio-${Date.now()}.${extension}`, { type: normalizedMimeType });
 
                 await sendMediaFile("audio", file);
             };

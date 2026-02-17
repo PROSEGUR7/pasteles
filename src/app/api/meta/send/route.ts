@@ -11,6 +11,34 @@ export const runtime = "nodejs";
 
 type SenderType = "ia" | "humano" | "sistema";
 
+function normalizeMimeType(mime: string | null | undefined) {
+    const raw = (mime || "").trim();
+    if (!raw) return "";
+    return raw.split(";")[0]?.trim() || raw;
+}
+
+async function sanitizeFileForMetaUpload(file: File) {
+    const normalizedType = normalizeMimeType(file.type);
+    if (!normalizedType || normalizedType === file.type) return file;
+    const buffer = Buffer.from(await file.arrayBuffer());
+    return new File([buffer], file.name || `upload-${Date.now()}.bin`, { type: normalizedType });
+}
+
+function shouldTranscodeAudio(file: File) {
+    const mime = (file.type || "").toLowerCase();
+    const normalized = normalizeMimeType(mime);
+    const name = (file.name || "").toLowerCase();
+
+    if (mime.includes("codecs=")) return true;
+    if (normalized !== mime && normalized.startsWith("audio/")) return true;
+    if (name.endsWith(".webm") || name.endsWith(".m4a") || name.endsWith(".mp4") || name.endsWith(".opus")) {
+        return true;
+    }
+    if (mime.includes("webm") || mime.includes("mp4") || mime.includes("opus")) return true;
+
+    return false;
+}
+
 async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
     if (!ffmpegPath) {
         throw new Error(
@@ -108,16 +136,12 @@ export async function POST(request: NextRequest) {
             let uploadFile = file;
             if (
                 type === "audio" &&
-                (
-                    file.type?.toLowerCase().includes("webm") ||
-                    file.type?.toLowerCase().includes("mp4") ||
-                    file.name?.toLowerCase().endsWith(".webm") ||
-                    file.name?.toLowerCase().endsWith(".m4a") ||
-                    file.name?.toLowerCase().endsWith(".mp4")
-                )
+                shouldTranscodeAudio(file)
             ) {
                 uploadFile = await transcodeAudioToOggOpus(file);
             }
+
+            uploadFile = await sanitizeFileForMetaUpload(uploadFile);
 
             const uploaded = await uploadMetaMedia(uploadFile);
             const sent = await sendMetaMessage(
