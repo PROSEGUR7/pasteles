@@ -90,12 +90,14 @@ export async function POST(request: NextRequest) {
             console.error("[Meta Webhook] Persist error:", persistError);
         }
 
-        fireWebhook({
-            provider: "meta-whatsapp",
-            payload,
-        }).catch((relayError) => {
+        try {
+            await fireWebhook({
+                provider: "meta-whatsapp",
+                payload,
+            });
+        } catch (relayError) {
             console.error("[Meta Webhook] Relay to n8n error:", relayError);
-        });
+        }
 
         return NextResponse.json({ received: true }, { status: 200 });
     } catch (error) {
