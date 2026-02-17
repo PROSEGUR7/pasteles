@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendMetaTextMessage } from "@/lib/metaApi";
+import { sendMetaMessage } from "@/lib/metaApi";
 import { persistOutboundMetaMessage } from "@/lib/metaStore";
 
 export const runtime = "nodejs";
@@ -33,33 +33,65 @@ export async function POST(request: NextRequest) {
             to?: string;
             phone?: string;
             nombre?: string;
+            type?: "text" | "image" | "audio";
             message?: string;
             text?: string;
             body?: string;
+            imageUrl?: string;
+            audioUrl?: string;
+            mediaUrl?: string;
+            mediaId?: string;
+            caption?: string;
             senderType?: SenderType;
             source?: "n8n" | "dashboard" | "meta";
         };
 
         const waId = (body.waId || body.to || body.phone || "").trim();
         const message = (body.message || body.text || body.body || "").trim();
+        const type = body.type || "text";
 
         if (!waId) {
             return NextResponse.json({ error: "waId/to es requerido" }, { status: 400 });
         }
 
-        if (!message) {
-            return NextResponse.json({ error: "message/text es requerido" }, { status: 400 });
+        if (type === "text" && !message) {
+            return NextResponse.json({ error: "message/text es requerido para type=text" }, { status: 400 });
         }
 
-        const sent = await sendMetaTextMessage({
-            to: waId,
-            message,
-        });
+        const sent = await sendMetaMessage(
+            type === "image"
+                ? {
+                      to: waId,
+                      type: "image",
+                      imageUrl: body.imageUrl || body.mediaUrl,
+                      mediaId: body.mediaId,
+                      caption: body.caption,
+                  }
+                : type === "audio"
+                  ? {
+                        to: waId,
+                        type: "audio",
+                        audioUrl: body.audioUrl || body.mediaUrl,
+                        mediaId: body.mediaId,
+                    }
+                  : {
+                        to: waId,
+                        type: "text",
+                        message,
+                    }
+        );
+
+        const previewBody =
+            type === "image"
+                ? body.caption?.trim() || "📷 Imagen"
+                : type === "audio"
+                  ? "🎵 Audio"
+                  : message;
 
         await persistOutboundMetaMessage({
             waId,
             nombre: body.nombre,
-            body: message,
+            body: previewBody,
             messageId: sent.messageId,
             senderType: body.senderType || "ia",
             source: body.source || "n8n",
@@ -68,6 +100,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             ok: true,
             to: waId,
+            type,
             messageId: sent.messageId || null,
         });
     } catch (error) {

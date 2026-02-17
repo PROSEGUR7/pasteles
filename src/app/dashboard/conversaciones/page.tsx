@@ -287,6 +287,67 @@ export default function ConversacionesPage() {
         }
     }, [conversacionActiva, draftMessage, inputBloqueado, sendingMessage, fetchMensajes, fetchConversaciones]);
 
+    const handleEnviarMedia = useCallback(
+        async (type: "image" | "audio") => {
+            if (!conversacionActiva || inputBloqueado || sendingMessage) return;
+
+            const label = type === "image" ? "imagen" : "audio";
+            const url = window.prompt(`Pega la URL pública del ${label}:`)?.trim();
+            if (!url) return;
+
+            try {
+                setActionError(null);
+                setSendingMessage(true);
+
+                const payload =
+                    type === "image"
+                        ? {
+                              waId: conversacionActiva.waId,
+                              nombre: conversacionActiva.nombre,
+                              type: "image" as const,
+                              imageUrl: url,
+                              senderType: "humano" as const,
+                              source: "dashboard" as const,
+                          }
+                        : {
+                              waId: conversacionActiva.waId,
+                              nombre: conversacionActiva.nombre,
+                              type: "audio" as const,
+                              audioUrl: url,
+                              senderType: "humano" as const,
+                              source: "dashboard" as const,
+                          };
+
+                const res = await fetch("/api/meta/send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!res.ok) {
+                    let backendMessage = `No se pudo enviar ${label}`;
+                    try {
+                        const data = await res.json();
+                        if (typeof data?.error === "string") backendMessage = data.error;
+                    } catch {
+                        // noop
+                    }
+                    throw new Error(backendMessage);
+                }
+
+                await fetchMensajes(conversacionActiva.waId);
+                fetchConversaciones(true);
+            } catch (err) {
+                setActionError(
+                    err instanceof Error && err.message ? err.message : `No se pudo enviar ${label}`
+                );
+            } finally {
+                setSendingMessage(false);
+            }
+        },
+        [conversacionActiva, inputBloqueado, sendingMessage, fetchMensajes, fetchConversaciones]
+    );
+
     useEffect(() => {
         fetchConversaciones();
         const interval = setInterval(() => fetchConversaciones(true), 5000);
@@ -617,6 +678,22 @@ export default function ConversacionesPage() {
                                             placeholder={`Escribe un mensaje para ${conversacionActiva.nombre}`}
                                             disabled={inputBloqueado}
                                         />
+                                        <button
+                                            onClick={() => handleEnviarMedia("image")}
+                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={inputBloqueado || sendingMessage}
+                                            title="Enviar imagen por URL"
+                                        >
+                                            Imagen
+                                        </button>
+                                        <button
+                                            onClick={() => handleEnviarMedia("audio")}
+                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={inputBloqueado || sendingMessage}
+                                            title="Enviar audio por URL"
+                                        >
+                                            Audio
+                                        </button>
                                         <button
                                             onClick={handleEnviarMensaje}
                                             className="btn-primary whitespace-nowrap"
