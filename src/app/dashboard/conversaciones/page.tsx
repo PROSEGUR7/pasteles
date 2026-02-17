@@ -493,11 +493,24 @@ export default function ConversacionesPage() {
         setActionError(null);
         setClosingChat(false);
         setSelectedImageFile(null);
+        setBrokenImageByMessageId({});
         setSelectedImagePreviewUrl((prev) => {
             if (prev) URL.revokeObjectURL(prev);
             return null;
         });
     }, [seleccionada]);
+
+    useEffect(() => {
+        setBrokenImageByMessageId((prev) => {
+            if (!Object.keys(prev).length) return prev;
+            const next: Record<string, boolean> = {};
+            const existingIds = new Set(mensajes.map((m) => m.messageId));
+            for (const messageId of Object.keys(prev)) {
+                if (existingIds.has(messageId)) next[messageId] = prev[messageId];
+            }
+            return next;
+        });
+    }, [mensajes]);
 
     useEffect(() => {
         return () => {

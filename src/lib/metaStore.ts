@@ -362,7 +362,9 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
                       : null,
             mediaUrl:
                 raw?.type === "image" || raw?.mediaType === "image"
-                    ? (typeof raw?.imageUrl === "string" && raw.imageUrl.trim())
+                    ? (typeof raw?.urlImagen === "string" && raw.urlImagen.trim())
+                        || (typeof raw?.urlimagen === "string" && raw.urlimagen.trim())
+                        || (typeof raw?.imageUrl === "string" && raw.imageUrl.trim())
                         || (typeof raw?.mediaUrl === "string" && raw.mediaUrl.trim())
                         || (typeof rawImage?.link === "string" && rawImage.link.trim())
                         || (typeof rawImage?.id === "string" && rawImage.id.trim()
