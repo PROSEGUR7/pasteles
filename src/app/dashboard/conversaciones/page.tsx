@@ -515,15 +515,8 @@ export default function ConversacionesPage() {
     }, [busqueda, conversaciones]);
 
     return (
-        <div className="h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden min-h-0 pr-1">
-            <div className="animate-in">
-                <h1 className="text-3xl font-bold text-surface-50">Conversaciones</h1>
-                <p className="text-surface-400 text-sm mt-1">
-                    Recibe y responde mensajes de Meta en tiempo real.
-                </p>
-            </div>
-
-            <div className="glass-card overflow-hidden animate-in flex-1 min-h-0" style={{ animationDelay: "100ms" }}>
+        <div className="h-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden min-h-0 pr-1 pt-1">
+            <div className="glass-card overflow-hidden animate-in flex-1 min-h-0">
                     <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
                     <aside className="border-r border-surface-800/30 bg-white/50 flex flex-col min-h-0">
                         <div className="p-4 border-b border-surface-800/20 space-y-4">
