@@ -31,16 +31,32 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get("hub.verify_token");
     const challenge = searchParams.get("hub.challenge");
 
-    const verifyToken = process.env.META_VERIFY_TOKEN;
+    const verifyToken = process.env.META_VERIFY_TOKEN || process.env.VERIFY_TOKEN;
 
-    if (mode === "subscribe" && token && verifyToken && token === verifyToken) {
+    if (!mode && !token && !challenge) {
+        return NextResponse.json(
+            {
+                ok: true,
+                message: "Meta webhook endpoint activo",
+                verifyParamExample: "?hub.mode=subscribe&hub.verify_token=TU_TOKEN&hub.challenge=12345",
+            },
+            { status: 200 }
+        );
+    }
+
+    if (
+        mode === "subscribe" &&
+        token &&
+        verifyToken &&
+        token.trim() === verifyToken.trim()
+    ) {
         return new NextResponse(challenge || "", { status: 200 });
     }
 
     return NextResponse.json(
         {
             error: "Webhook verification failed",
-            hint: "Configura META_VERIFY_TOKEN y usa el mismo valor en Meta",
+            hint: "Configura META_VERIFY_TOKEN (o VERIFY_TOKEN) y usa el mismo valor en Meta",
         },
         { status: 403 }
     );
