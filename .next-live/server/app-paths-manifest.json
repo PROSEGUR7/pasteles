@@ -1,13 +1,4 @@
 {
-  "/api/clientes/route": "app/api/clientes/route.js",
-  "/api/conversaciones/route": "app/api/conversaciones/route.js",
-  "/api/conversaciones/[waId]/route": "app/api/conversaciones/[waId]/route.js",
-  "/api/productos/route": "app/api/productos/route.js",
-  "/api/sedes/route": "app/api/sedes/route.js",
-  "/api/dashboard/stats/route": "app/api/dashboard/stats/route.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/dashboard/clientes/page": "app/dashboard/clientes/page.js",
-  "/dashboard/conversaciones/page": "app/dashboard/conversaciones/page.js",
-  "/dashboard/productos/page": "app/dashboard/productos/page.js",
-  "/dashboard/sedes/page": "app/dashboard/sedes/page.js"
+  "/page": "app/page.js",
+  "/login/page": "app/login/page.js"
 }
