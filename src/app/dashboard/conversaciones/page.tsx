@@ -139,14 +139,29 @@ export default function ConversacionesPage() {
 
     const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
     const botActivo = conversacionActiva?.botStatus === "activo";
-    const inputBloqueado = !conversacionActiva || conversacionActiva.estado === "cerrado" || botActivo;
+    const inputBloqueado = !conversacionActiva || botActivo;
 
     const handleCerrarChat = useCallback(async () => {
         if (!seleccionada || closingChat) return;
+        const waIdObjetivo = seleccionada;
+        const conversacionObjetivo = conversaciones.find((conversation) => conversation.waId === waIdObjetivo);
+
+        if (conversacionObjetivo?.estado === "cerrado") {
+            setSeleccionada(null);
+            setMensajes([]);
+            setDraftMessage("");
+            setActionError(null);
+            return;
+        }
+
+        setSeleccionada(null);
+        setMensajes([]);
+        setDraftMessage("");
+
         try {
             setActionError(null);
             setClosingChat(true);
-            const encodedWaId = encodeURIComponent(seleccionada);
+            const encodedWaId = encodeURIComponent(waIdObjetivo);
             const res = await fetch(`/api/conversaciones/${encodedWaId}`, { method: "DELETE" });
             if (!res.ok) {
                 let backendMessage = "Error cerrando la conversación";
@@ -161,14 +176,11 @@ export default function ConversacionesPage() {
 
             setConversaciones((prev) =>
                 prev.map((conversation) =>
-                    conversation.waId === seleccionada
+                    conversation.waId === waIdObjetivo
                         ? { ...conversation, estado: "cerrado" }
                         : conversation
                 )
             );
-            setMensajes([]);
-            setSeleccionada(null);
-            setDraftMessage("");
             fetchConversaciones(true);
         } catch (err) {
             console.error("[Conversaciones] Cerrar chat", err);
@@ -180,7 +192,7 @@ export default function ConversacionesPage() {
         } finally {
             setClosingChat(false);
         }
-    }, [seleccionada, closingChat, fetchConversaciones]);
+    }, [seleccionada, closingChat, conversaciones, fetchConversaciones]);
 
     const handleToggleBot = useCallback(async () => {
         if (!conversacionActiva || updatingBot) return;
@@ -370,11 +382,15 @@ export default function ConversacionesPage() {
                                                         />
                                                         {conversacion.canal}
                                                     </span>
-                                                    {conversacion.estado === "cerrado" && (
-                                                        <span className="px-2 py-0.5 rounded-full bg-surface-900/10 text-surface-500">
-                                                            Cerrado
-                                                        </span>
-                                                    )}
+                                                    <span
+                                                        className={`px-2 py-0.5 rounded-full ${
+                                                            conversacion.botStatus === "activo"
+                                                                ? "bg-emerald-500/15 text-emerald-700"
+                                                                : "bg-blue-500/15 text-blue-700"
+                                                        }`}
+                                                    >
+                                                        {conversacion.botStatus === "activo" ? "IA" : "Humano"}
+                                                    </span>
                                                 </div>
                                             </div>
                                             {conversacion.unreadCount > 0 && (
@@ -429,15 +445,15 @@ export default function ConversacionesPage() {
                                             </button>
                                             <button
                                                 onClick={handleCerrarChat}
-                                                disabled={closingChat || conversacionActiva.estado === "cerrado"}
+                                                disabled={closingChat}
                                                 className={`px-3 py-2 rounded-md text-white ${
-                                                    closingChat || conversacionActiva.estado === "cerrado"
+                                                    closingChat
                                                         ? "bg-primary-500/60 cursor-not-allowed"
                                                         : "bg-primary-500 hover:bg-primary-600"
                                                 }`}
                                             >
                                                 {conversacionActiva.estado === "cerrado"
-                                                    ? "Chat cerrado"
+                                                    ? "Quitar selección"
                                                     : closingChat
                                                         ? "Cerrando..."
                                                         : "Cerrar chat"}
@@ -553,9 +569,7 @@ export default function ConversacionesPage() {
                                         </button>
                                     </div>
                                     <p className="text-[11px] text-surface-400 mt-2">
-                                        {conversacionActiva.estado === "cerrado"
-                                            ? "Este chat está cerrado."
-                                            : botActivo
+                                        {botActivo
                                                 ? "Bot IA activo: desactívalo para responder manualmente."
                                                 : "Modo manual activo: ya puedes escribir."}
                                     </p>
