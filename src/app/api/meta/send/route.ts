@@ -1,10 +1,64 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendMetaMessage, uploadMetaMedia } from "@/lib/metaApi";
 import { persistOutboundMetaMessage } from "@/lib/metaStore";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import ffmpegPath from "ffmpeg-static";
 
 export const runtime = "nodejs";
 
 type SenderType = "ia" | "humano" | "sistema";
+
+async function transcodeWebmToMp3(inputFile: File): Promise<File> {
+    if (!ffmpegPath) {
+        throw new Error("No hay ffmpeg disponible para convertir audio. Sube el audio como archivo (.mp3/.ogg/.m4a). (HTTP 400)");
+    }
+
+    const ffmpegBinary = ffmpegPath;
+
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "pasteles-audio-"));
+    const inPath = path.join(tmpDir, "input.webm");
+    const outPath = path.join(tmpDir, "output.mp3");
+
+    try {
+        const buffer = Buffer.from(await inputFile.arrayBuffer());
+        await writeFile(inPath, buffer);
+
+        await new Promise<void>((resolve, reject) => {
+            execFile(
+                ffmpegBinary,
+                [
+                    "-y",
+                    "-i",
+                    inPath,
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "44100",
+                    "-b:a",
+                    "64k",
+                    outPath,
+                ],
+                (error, _stdout, stderr) => {
+                    if (!error) return resolve();
+                    reject(
+                        new Error(
+                            `No se pudo convertir audio (ffmpeg). ${stderr || error.message || ""}`.trim()
+                        )
+                    );
+                }
+            );
+        });
+
+        const mp3Buffer = await readFile(outPath);
+        return new File([mp3Buffer], `audio-${Date.now()}.mp3`, { type: "audio/mpeg" });
+    } finally {
+        await rm(tmpDir, { recursive: true, force: true }).catch(() => null);
+    }
+}
 
 function getBearerToken(authorization: string | null) {
     if (!authorization) return null;
@@ -49,14 +103,25 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: "file es requerido para multipart" }, { status: 400 });
             }
 
-            const uploaded = await uploadMetaMedia(file);
+            let uploadFile = file;
+            if (
+                type === "audio" &&
+                (file.type?.toLowerCase().includes("webm") || file.name?.toLowerCase().endsWith(".webm"))
+            ) {
+                uploadFile = await transcodeWebmToMp3(file);
+            }
+
+            const uploaded = await uploadMetaMedia(uploadFile);
             const sent = await sendMetaMessage(
                 type === "audio"
                     ? { to: waId, type: "audio", mediaId: uploaded.mediaId }
                     : { to: waId, type: "image", mediaId: uploaded.mediaId, caption: caption || undefined }
             );
 
-            const previewBody = type === "audio" ? `🎵 Audio (${file.name || "sin nombre"})` : (caption || `📷 Imagen (${file.name || "sin nombre"})`);
+            const previewBody =
+                type === "audio"
+                    ? `🎵 Audio (${uploadFile.name || file.name || "sin nombre"})`
+                    : (caption || `📷 Imagen (${file.name || "sin nombre"})`);
 
             await persistOutboundMetaMessage({
                 waId,
