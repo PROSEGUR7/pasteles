@@ -807,10 +807,10 @@ export default function ConversacionesPage() {
 
                                 <div className="border-t border-surface-800/20 bg-white/70 p-4">
                                     {selectedImagePreviewUrl && (
-                                        <div className="mb-3 rounded-xl border border-surface-800/20 bg-white p-3">
+                                        <div className="mb-3 rounded-xl border border-surface-800/20 bg-surface-100/80 p-3">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="space-y-2">
-                                                    <p className="text-xs font-semibold text-surface-500">Vista previa</p>
+                                                    <p className="text-xs font-semibold text-surface-500">Vista previa (no enviada)</p>
                                                     <img
                                                         src={selectedImagePreviewUrl}
                                                         alt={selectedImageFile?.name || "Imagen seleccionada"}

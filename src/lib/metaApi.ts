@@ -63,6 +63,17 @@ function buildPayload(input: SendMetaMessageInput, to: string) {
             throw new Error("imageUrl o mediaId es requerido para type=image");
         }
 
+        if (imageLink) {
+            try {
+                const parsed = new URL(imageLink);
+                if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+                    throw new Error("invalid");
+                }
+            } catch {
+                throw new Error("urlImagen/imageUrl debe ser una URL pública válida (http/https)");
+            }
+        }
+
         return {
             ...base,
             type: "image",
@@ -77,6 +88,17 @@ function buildPayload(input: SendMetaMessageInput, to: string) {
     const audioMediaId = input.mediaId?.trim();
     if (!audioLink && !audioMediaId) {
         throw new Error("audioUrl o mediaId es requerido para type=audio");
+    }
+
+    if (audioLink) {
+        try {
+            const parsed = new URL(audioLink);
+            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+                throw new Error("invalid");
+            }
+        } catch {
+            throw new Error("audioUrl debe ser una URL pública válida (http/https)");
+        }
     }
 
     return {

@@ -84,9 +84,13 @@ export async function POST(request: NextRequest) {
             phone?: string;
             nombre?: string;
             type?: "text" | "image" | "audio";
+            remitente?: SenderType;
+            sender?: SenderType;
+            mensaje?: string;
             message?: string;
             text?: string;
             body?: string;
+            urlImagen?: string;
             imageUrl?: string;
             audioUrl?: string;
             mediaUrl?: string;
@@ -96,9 +100,15 @@ export async function POST(request: NextRequest) {
             source?: "n8n" | "dashboard" | "meta";
         };
 
-        const waId = (body.waId || body.to || body.phone || "").trim();
-        const message = (body.message || body.text || body.body || "").trim();
-        const type = body.type || "text";
+                const waId = (body.waId || body.to || body.phone || "").trim();
+                const message = (body.mensaje || body.message || body.text || body.body || "").trim();
+                const imageUrl = (body.urlImagen || body.imageUrl || body.mediaUrl || "").trim();
+
+                const type: "text" | "image" | "audio" = body.type
+                        ? body.type
+                        : imageUrl
+                            ? "image"
+                            : "text";
 
         if (!waId) {
             return NextResponse.json({ error: "waId/to es requerido" }, { status: 400 });
@@ -108,14 +118,21 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "message/text es requerido para type=text" }, { status: 400 });
         }
 
+        if (type === "image" && !imageUrl && !body.mediaId) {
+            return NextResponse.json(
+                { error: "urlImagen/imageUrl/mediaId es requerido para type=image" },
+                { status: 400 }
+            );
+        }
+
         const sent = await sendMetaMessage(
             type === "image"
                 ? {
                       to: waId,
                       type: "image",
-                      imageUrl: body.imageUrl || body.mediaUrl,
+                      imageUrl,
                       mediaId: body.mediaId,
-                      caption: body.caption,
+                      caption: body.caption || message || undefined,
                   }
                 : type === "audio"
                   ? {
@@ -133,7 +150,7 @@ export async function POST(request: NextRequest) {
 
         const previewBody =
             type === "image"
-                ? body.caption?.trim() || "📷 Imagen"
+                ? body.caption?.trim() || message || "📷 Imagen"
                 : type === "audio"
                   ? "🎵 Audio"
                   : message;
@@ -144,8 +161,8 @@ export async function POST(request: NextRequest) {
             body: previewBody,
             messageId: sent.messageId,
             mediaType: type === "image" || type === "audio" ? type : undefined,
-            caption: type === "image" ? body.caption : undefined,
-            senderType: body.senderType || "ia",
+            caption: type === "image" ? (body.caption || message || undefined) : undefined,
+            senderType: body.senderType || body.remitente || body.sender || "ia",
             source: body.source || "n8n",
         });
 
@@ -157,11 +174,17 @@ export async function POST(request: NextRequest) {
         });
     } catch (error) {
         console.error("[Meta Send] Error:", error);
+        const message = error instanceof Error ? error.message : "No se pudo enviar mensaje a Meta";
+        const statusMatch = message.match(/\(HTTP\s+(\d{3})\)/i);
+        const statusFromMessage = statusMatch ? Number(statusMatch[1]) : null;
+        const status = statusFromMessage && statusFromMessage >= 400 && statusFromMessage < 600
+            ? statusFromMessage
+            : 500;
         return NextResponse.json(
             {
-                error: error instanceof Error ? error.message : "No se pudo enviar mensaje a Meta",
+                error: message,
             },
-            { status: 500 }
+            { status }
         );
     }
 }
