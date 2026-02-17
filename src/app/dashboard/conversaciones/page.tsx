@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type FiltroCanal = "Todos" | "No leídos";
 
@@ -64,27 +64,75 @@ function getSenderBadgeClass(senderType: ConversationMessage["senderType"]) {
     return "bg-violet-500/15 text-violet-700";
 }
 
-function renderInlineFormat(text: string) {
-    const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-    return tokens.map((token, index) => {
-        if (token.startsWith("**") && token.endsWith("**") && token.length > 4) {
-            return <strong key={`b-${index}`}>{token.slice(2, -2)}</strong>;
+function renderInlineSegments(segment: string) {
+    const nodes: ReactNode[] = [];
+    const pattern = /(\*{1,2}[^*]+\*{1,2}|_{1,2}[^_]+_{1,2}|~[^~]+~|`[^`]+`)/g;
+    let lastIndex = 0;
+    let tokenIndex = 0;
+
+    segment.replace(pattern, (match, _group, offset) => {
+        if (offset > lastIndex) {
+            nodes.push(segment.slice(lastIndex, offset));
         }
-        if (token.startsWith("*") && token.endsWith("*") && token.length > 2) {
-            return <em key={`i-${index}`}>{token.slice(1, -1)}</em>;
-        }
-        return <Fragment key={`t-${index}`}>{token}</Fragment>;
+        nodes.push(renderToken(match, tokenIndex++));
+        lastIndex = offset + match.length;
+        return "";
     });
+
+    if (lastIndex < segment.length) {
+        nodes.push(segment.slice(lastIndex));
+    }
+
+    return nodes;
+}
+
+function renderToken(token: string, keyIndex: number) {
+    const markerChar = token[0];
+    const markerLength = token.startsWith("**") || token.startsWith("__") ? 2 : 1;
+    const content = token.slice(markerLength, token.length - markerLength);
+    const key = `${markerChar}-${keyIndex}`;
+
+    switch (markerChar) {
+        case "*":
+            return <strong key={key}>{content}</strong>;
+        case "_":
+            return <em key={key}>{content}</em>;
+        case "~":
+            return <s key={key}>{content}</s>;
+        case "`":
+            return (
+                <code
+                    key={key}
+                    className="px-1 py-0.5 rounded bg-surface-900/60 text-surface-200 text-[11px]"
+                >
+                    {content}
+                </code>
+            );
+        default:
+            return content;
+    }
 }
 
 function renderMessageBody(text: string) {
-    const lines = text.split("\n");
-    return lines.map((line, index) => (
-        <Fragment key={`line-${index}`}>
-            {renderInlineFormat(line)}
-            {index < lines.length - 1 ? <br /> : null}
-        </Fragment>
-    ));
+    const lines = text.split(/\r?\n/);
+    return lines.map((line, index) => {
+        const bulletMatch = line.match(/^\s*([-•])\s+(.*)$/);
+        if (bulletMatch) {
+            return (
+                <div key={`line-${index}`} className="flex items-start gap-2">
+                    <span className="leading-6">•</span>
+                    <span>{renderInlineSegments(bulletMatch[2])}</span>
+                </div>
+            );
+        }
+
+        return (
+            <Fragment key={`line-${index}`}>
+                {renderInlineSegments(line)}
+                {index < lines.length - 1 ? <br /> : null}
+            </Fragment>
+        );
+    });
 }
 
 export default function ConversacionesPage() {
@@ -468,6 +516,8 @@ export default function ConversacionesPage() {
             mediaStreamRef.current = stream;
 
             const preferredMimeTypes = [
+                "audio/webm;codecs=opus",
+                "audio/webm",
                 "audio/ogg;codecs=opus",
                 "audio/ogg",
                 "audio/mp4",
@@ -478,16 +528,20 @@ export default function ConversacionesPage() {
             ];
 
             const supportedMime = preferredMimeTypes.find((mime) => MediaRecorder.isTypeSupported(mime));
-            if (!supportedMime) {
+
+            let recorder: MediaRecorder;
+            try {
+                recorder = supportedMime
+                    ? new MediaRecorder(stream, { mimeType: supportedMime })
+                    : new MediaRecorder(stream);
+            } catch {
                 stream.getTracks().forEach((track) => track.stop());
                 mediaStreamRef.current = null;
                 setActionError(
-                    "Tu navegador graba en formato no compatible con Meta. Usa Audio para subir un archivo (.mp3, .ogg, .m4a)."
+                    "No pudimos iniciar la grabación en este navegador. Usa Audio para subir un archivo (.mp3, .ogg, .m4a)."
                 );
                 return;
             }
-
-            const recorder = new MediaRecorder(stream, { mimeType: supportedMime });
 
             mediaRecorderRef.current = recorder;
             const chunks: BlobPart[] = [];
@@ -503,7 +557,7 @@ export default function ConversacionesPage() {
                 stream.getTracks().forEach((track) => track.stop());
                 mediaStreamRef.current = null;
 
-                const finalType = recorder.mimeType || supportedMime;
+                const finalType = recorder.mimeType || supportedMime || "audio/webm";
                 const blob = new Blob(chunks, { type: finalType });
                 const extension = finalType.includes("ogg")
                     ? "ogg"
@@ -511,6 +565,8 @@ export default function ConversacionesPage() {
                         ? "m4a"
                         : finalType.includes("mpeg")
                             ? "mp3"
+                            : finalType.includes("webm")
+                                ? "webm"
                             : finalType.includes("amr")
                                 ? "amr"
                                 : finalType.includes("aac")
@@ -842,13 +898,18 @@ export default function ConversacionesPage() {
                                             className={`flex ${mensaje.direction === "outbound" ? "justify-end" : "justify-start"}`}
                                         >
                                             {(() => {
+                                                const bodyText = (mensaje.body || "").trim();
                                                 const previewUrl = imagePreviewByMessageId[mensaje.messageId];
                                                 const remoteMediaUrl = mensaje.mediaUrl || null;
                                                 const imageUrl = remoteMediaUrl || previewUrl;
                                                 const isImage =
                                                     mensaje.mediaType === "image" ||
                                                     Boolean(previewUrl) ||
-                                                    Boolean(remoteMediaUrl);
+                                                    /^📷\s*/.test(bodyText);
+                                                const isAudio =
+                                                    mensaje.mediaType === "audio" ||
+                                                    /^🎵\s*audio/i.test(bodyText);
+                                                const audioUrl = isAudio ? remoteMediaUrl : null;
                                                 const imageFailed = Boolean(brokenImageByMessageId[mensaje.messageId]);
                                                 return (
                                             <div
@@ -894,17 +955,36 @@ export default function ConversacionesPage() {
                                                             }
                                                         />
                                                         {mensaje.body ? (
-                                                            <p className="whitespace-pre-wrap break-words">{renderMessageBody(mensaje.body)}</p>
+                                                            <div className="whitespace-pre-wrap break-words leading-relaxed">
+                                                                {renderMessageBody(mensaje.body)}
+                                                            </div>
                                                         ) : null}
                                                     </div>
                                                 ) : isImage ? (
-                                                    <p className="whitespace-pre-wrap break-words">
+                                                    <div className="whitespace-pre-wrap break-words leading-relaxed">
                                                         {mensaje.body ? renderMessageBody(mensaje.body) : "📷 Imagen"}
-                                                    </p>
+                                                    </div>
+                                                ) : isAudio ? (
+                                                    <div className="space-y-2">
+                                                        <audio
+                                                            controls
+                                                            preload="none"
+                                                            src={audioUrl || undefined}
+                                                            className="w-full max-w-[320px]"
+                                                        />
+                                                        {!audioUrl ? (
+                                                            <p className="text-[11px] opacity-80">
+                                                                Audio sin URL reproducible en este mensaje.
+                                                            </p>
+                                                        ) : null}
+                                                        <div className="whitespace-pre-wrap break-words leading-relaxed">
+                                                            {mensaje.body ? renderMessageBody(mensaje.body) : "🎵 Audio"}
+                                                        </div>
+                                                    </div>
                                                 ) : (
-                                                    <p className="whitespace-pre-wrap break-words">
+                                                    <div className="whitespace-pre-wrap break-words leading-relaxed">
                                                         {mensaje.body ? renderMessageBody(mensaje.body) : "Mensaje sin texto"}
-                                                    </p>
+                                                    </div>
                                                 )}
                                                 <p
                                                     className={`mt-1 text-[10px] ${

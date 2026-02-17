@@ -79,7 +79,7 @@ type MetaWebhookMessage = {
         list_reply?: { title?: string };
     };
     image?: { id?: string; caption?: string; link?: string };
-    audio?: Record<string, unknown>;
+    audio?: { id?: string; link?: string };
     sticker?: Record<string, unknown>;
     document?: { filename?: string };
 };
@@ -352,20 +352,36 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
             raw && typeof raw.image === "object" && raw.image !== null
                 ? (raw.image as { id?: string; link?: string })
                 : undefined;
+        const rawAudio =
+            raw && typeof raw.audio === "object" && raw.audio !== null
+                ? (raw.audio as { id?: string; link?: string })
+                : undefined;
+        const bodyText = typeof row.body === "string" ? row.body : "";
+        const hasImageHint =
+            raw?.type === "image" ||
+            raw?.mediaType === "image" ||
+            Boolean(rawImage?.id) ||
+            Boolean(rawImage?.link) ||
+            (typeof raw?.imageUrl === "string" && raw.imageUrl.trim().length > 0) ||
+            (typeof raw?.urlImagen === "string" && raw.urlImagen.trim().length > 0) ||
+            bodyText.startsWith("📷");
+        const hasAudioHint =
+            raw?.type === "audio" ||
+            raw?.mediaType === "audio" ||
+            Boolean(rawAudio?.id) ||
+            Boolean(rawAudio?.link) ||
+            (typeof raw?.audioUrl === "string" && raw.audioUrl.trim().length > 0) ||
+            (typeof raw?.mediaUrl === "string" && raw.mediaUrl.trim().length > 0) ||
+            bodyText.startsWith("🎵");
         const direction = row.direction as "inbound" | "outbound";
         return {
             messageId: row.message_id,
             direction,
             body: row.body,
             timestamp: row.timestamp,
-            mediaType:
-                raw?.mediaType === "image" || raw?.type === "image"
-                    ? "image"
-                    : raw?.mediaType === "audio" || raw?.type === "audio"
-                      ? "audio"
-                      : null,
+            mediaType: hasImageHint ? "image" : hasAudioHint ? "audio" : null,
             mediaUrl:
-                raw?.type === "image" || raw?.mediaType === "image"
+                hasImageHint
                     ? (typeof raw?.urlImagen === "string" && raw.urlImagen.trim())
                         || (typeof raw?.urlimagen === "string" && raw.urlimagen.trim())
                         || (typeof raw?.imageUrl === "string" && raw.imageUrl.trim())
@@ -376,6 +392,15 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
                             : typeof raw?.mediaId === "string" && raw.mediaId.trim()
                               ? `/api/meta/media/${encodeURIComponent(raw.mediaId.trim())}`
                               : null)
+                                        : hasAudioHint
+                                            ? (typeof raw?.audioUrl === "string" && raw.audioUrl.trim())
+                                                || (typeof raw?.mediaUrl === "string" && raw.mediaUrl.trim())
+                                                || (typeof rawAudio?.link === "string" && rawAudio.link.trim())
+                                                || (typeof rawAudio?.id === "string" && rawAudio.id.trim()
+                                                        ? `/api/meta/media/${encodeURIComponent(rawAudio.id.trim())}`
+                                                        : typeof raw?.mediaId === "string" && raw.mediaId.trim()
+                                                            ? `/api/meta/media/${encodeURIComponent(raw.mediaId.trim())}`
+                                                            : null)
                     : null,
             senderType: inferSenderType(raw, direction),
             interventionStatus: inferInterventionStatus(raw),
@@ -468,6 +493,12 @@ export async function persistOutboundMetaMessage(params: {
                 mediaId: params.mediaId,
                 mediaUrl: params.mediaUrl,
                 image: params.mediaType === "image"
+                    ? {
+                        ...(params.mediaId ? { id: params.mediaId } : {}),
+                        ...(params.mediaUrl ? { link: params.mediaUrl } : {}),
+                    }
+                    : undefined,
+                audio: params.mediaType === "audio"
                     ? {
                         ...(params.mediaId ? { id: params.mediaId } : {}),
                         ...(params.mediaUrl ? { link: params.mediaUrl } : {}),

@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
                 messageId: sent.messageId,
                 mediaType: type,
                 mediaId: uploaded.mediaId,
+                mediaUrl: `/api/meta/media/${encodeURIComponent(uploaded.mediaId)}`,
                 caption: caption || undefined,
                 senderType,
                 source,
@@ -190,7 +191,12 @@ export async function POST(request: NextRequest) {
             messageId: sent.messageId,
             mediaType: resolvedType === "image" || resolvedType === "audio" ? resolvedType : undefined,
             mediaId: resolvedType === "image" || resolvedType === "audio" ? body.mediaId : undefined,
-            mediaUrl: resolvedType === "image" ? imageUrl || undefined : undefined,
+            mediaUrl:
+                resolvedType === "image"
+                    ? imageUrl || undefined
+                    : resolvedType === "audio"
+                      ? body.audioUrl || body.mediaUrl || undefined
+                      : undefined,
             caption: resolvedType === "image" ? (body.caption || message || undefined) : undefined,
             senderType,
             source,
