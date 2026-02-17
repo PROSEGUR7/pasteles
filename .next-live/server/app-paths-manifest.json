@@ -1,4 +1,0 @@
-{
-  "/api/conversaciones/route": "app/api/conversaciones/route.js",
-  "/api/conversaciones/[waId]/route": "app/api/conversaciones/[waId]/route.js"
-}
