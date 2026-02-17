@@ -84,6 +84,8 @@ export default function ConversacionesPage() {
     const [imagePreviewByMessageId, setImagePreviewByMessageId] = useState<Record<string, string>>({});
     const [brokenImageByMessageId, setBrokenImageByMessageId] = useState<Record<string, boolean>>({});
     const imageInputRef = useRef<HTMLInputElement | null>(null);
+    const audioInputRef = useRef<HTMLInputElement | null>(null);
+    const messagesContainerRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
 
@@ -382,7 +384,11 @@ export default function ConversacionesPage() {
             fetchConversaciones(true);
         } catch (err) {
             setActionError(
-                err instanceof Error && err.message ? err.message : `No se pudo enviar ${label}`
+                err instanceof Error && err.message
+                    ? /Param file must be a file/i.test(err.message)
+                        ? "Meta no acepta ese formato de audio. Usa .mp3, .ogg o .m4a."
+                        : err.message
+                    : `No se pudo enviar ${label}`
             );
         } finally {
             setSendingMessage(false);
@@ -393,6 +399,21 @@ export default function ConversacionesPage() {
         if (inputBloqueado || sendingMessage) return;
         imageInputRef.current?.click();
     }, [inputBloqueado, sendingMessage]);
+
+    const handleSeleccionarAudio = useCallback(() => {
+        if (inputBloqueado || sendingMessage) return;
+        audioInputRef.current?.click();
+    }, [inputBloqueado, sendingMessage]);
+
+    const handleAudioSeleccionado = useCallback(
+        async (event: React.ChangeEvent<HTMLInputElement>) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            await sendMediaFile("audio", file);
+        },
+        [sendMediaFile]
+    );
 
     const handleImagenSeleccionada = useCallback(
         (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -426,14 +447,25 @@ export default function ConversacionesPage() {
 
             const preferredMimeTypes = [
                 "audio/ogg;codecs=opus",
-                "audio/webm;codecs=opus",
-                "audio/webm",
+                "audio/ogg",
+                "audio/mp4",
+                "audio/aac",
+                "audio/mpeg",
+                "audio/amr",
+                "audio/opus",
             ];
 
             const supportedMime = preferredMimeTypes.find((mime) => MediaRecorder.isTypeSupported(mime));
-            const recorder = supportedMime
-                ? new MediaRecorder(stream, { mimeType: supportedMime })
-                : new MediaRecorder(stream);
+            if (!supportedMime) {
+                stream.getTracks().forEach((track) => track.stop());
+                mediaStreamRef.current = null;
+                setActionError(
+                    "Tu navegador graba en formato no compatible con Meta. Usa Audio para subir un archivo (.mp3, .ogg, .m4a)."
+                );
+                return;
+            }
+
+            const recorder = new MediaRecorder(stream, { mimeType: supportedMime });
 
             mediaRecorderRef.current = recorder;
             const chunks: BlobPart[] = [];
@@ -449,9 +481,19 @@ export default function ConversacionesPage() {
                 stream.getTracks().forEach((track) => track.stop());
                 mediaStreamRef.current = null;
 
-                const finalType = recorder.mimeType || "audio/webm";
+                const finalType = recorder.mimeType || supportedMime;
                 const blob = new Blob(chunks, { type: finalType });
-                const extension = finalType.includes("ogg") ? "ogg" : "webm";
+                const extension = finalType.includes("ogg")
+                    ? "ogg"
+                    : finalType.includes("mp4")
+                        ? "m4a"
+                        : finalType.includes("mpeg")
+                            ? "mp3"
+                            : finalType.includes("amr")
+                                ? "amr"
+                                : finalType.includes("aac")
+                                    ? "aac"
+                                    : "opus";
                 const file = new File([blob], `audio-${Date.now()}.${extension}`, { type: finalType });
 
                 await sendMediaFile("audio", file);
@@ -511,6 +553,12 @@ export default function ConversacionesPage() {
             return next;
         });
     }, [mensajes]);
+
+    useEffect(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        container.scrollTop = container.scrollHeight;
+    }, [mensajes, seleccionada, loadingMensajes]);
 
     useEffect(() => {
         return () => {
@@ -752,7 +800,10 @@ export default function ConversacionesPage() {
                                     )}
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20 min-h-0">
+                                <div
+                                    ref={messagesContainerRef}
+                                    className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20 min-h-0"
+                                >
                                     {loadingMensajes && (
                                         <div className="text-center text-xs text-surface-400">Cargando mensajes...</div>
                                     )}
@@ -874,6 +925,13 @@ export default function ConversacionesPage() {
                                             onChange={handleImagenSeleccionada}
                                         />
                                         <input
+                                            ref={audioInputRef}
+                                            type="file"
+                                            accept="audio/mpeg,audio/mp3,audio/ogg,audio/mp4,audio/aac,audio/amr,audio/opus,audio/*"
+                                            className="hidden"
+                                            onChange={handleAudioSeleccionado}
+                                        />
+                                        <input
                                             value={draftMessage}
                                             onChange={(e) => setDraftMessage(e.target.value)}
                                             onKeyDown={(e) => {
@@ -897,12 +955,20 @@ export default function ConversacionesPage() {
                                             Imagen
                                         </button>
                                         <button
+                                            onClick={handleSeleccionarAudio}
+                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={inputBloqueado || sendingMessage}
+                                            title="Seleccionar archivo de audio"
+                                        >
+                                            Audio
+                                        </button>
+                                        <button
                                             onClick={handleAudioDesdeMicrofono}
                                             className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                             disabled={inputBloqueado || sendingMessage}
-                                            title={recordingAudio ? "Detener y enviar audio" : "Grabar audio"}
+                                            title={recordingAudio ? "Detener y enviar audio" : "Grabar con micrófono"}
                                         >
-                                            {recordingAudio ? "Detener" : "Audio"}
+                                            {recordingAudio ? "Detener" : "Grabar"}
                                         </button>
                                         <button
                                             onClick={handleEnviarMensaje}

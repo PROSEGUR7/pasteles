@@ -52,6 +52,19 @@
 }
 
 @layer components {
+  .dashboard-zoom-out {
+    zoom: 0.92;
+  }
+
+  @supports not (zoom: 1) {
+    .dashboard-zoom-out {
+      transform: scale(0.92);
+      transform-origin: top left;
+      width: calc(100% / 0.92);
+      min-height: calc(100vh / 0.92);
+    }
+  }
+
   .glass-card {
     background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(18px);
