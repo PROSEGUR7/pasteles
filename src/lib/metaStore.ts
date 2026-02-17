@@ -161,7 +161,11 @@ async function upsertConversation(params: {
         `INSERT INTO meta_conversations (wa_id, nombre, canal, last_message, last_message_at, estado, closed_at, bot_status)
          VALUES ($1, $2, $3, $4, $5, 'abierto', NULL, 'activo')
          ON CONFLICT (wa_id)
-         DO UPDATE SET nombre = EXCLUDED.nombre,
+         DO UPDATE SET nombre = CASE
+                            WHEN EXCLUDED.nombre IS NULL OR BTRIM(EXCLUDED.nombre) = '' THEN meta_conversations.nombre
+                            WHEN REGEXP_REPLACE(EXCLUDED.nombre, '\\D', '', 'g') = REGEXP_REPLACE(EXCLUDED.wa_id, '\\D', '', 'g') THEN meta_conversations.nombre
+                            ELSE EXCLUDED.nombre
+                       END,
                        canal = EXCLUDED.canal,
                        last_message = EXCLUDED.last_message,
                        last_message_at = EXCLUDED.last_message_at,
@@ -437,7 +441,11 @@ export async function persistOutboundMetaMessage(params: {
         `INSERT INTO meta_conversations (wa_id, nombre, canal, last_message, last_message_at, estado, closed_at)
          VALUES ($1, $2, 'WhatsApp', $3, $4, 'abierto', NULL)
          ON CONFLICT (wa_id)
-         DO UPDATE SET nombre = EXCLUDED.nombre,
+         DO UPDATE SET nombre = CASE
+                            WHEN EXCLUDED.nombre IS NULL OR BTRIM(EXCLUDED.nombre) = '' THEN meta_conversations.nombre
+                            WHEN REGEXP_REPLACE(EXCLUDED.nombre, '\\D', '', 'g') = REGEXP_REPLACE(EXCLUDED.wa_id, '\\D', '', 'g') THEN meta_conversations.nombre
+                            ELSE EXCLUDED.nombre
+                       END,
                        last_message = EXCLUDED.last_message,
                        last_message_at = EXCLUDED.last_message_at,
                        estado = 'abierto',

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type FiltroCanal = "Todos" | "No leídos";
 
@@ -62,6 +62,29 @@ function getSenderBadgeClass(senderType: ConversationMessage["senderType"]) {
     if (senderType === "humano") return "bg-blue-500/15 text-blue-700";
     if (senderType === "cliente") return "bg-surface-900/10 text-surface-500";
     return "bg-violet-500/15 text-violet-700";
+}
+
+function renderInlineFormat(text: string) {
+    const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+    return tokens.map((token, index) => {
+        if (token.startsWith("**") && token.endsWith("**") && token.length > 4) {
+            return <strong key={`b-${index}`}>{token.slice(2, -2)}</strong>;
+        }
+        if (token.startsWith("*") && token.endsWith("*") && token.length > 2) {
+            return <em key={`i-${index}`}>{token.slice(1, -1)}</em>;
+        }
+        return <Fragment key={`t-${index}`}>{token}</Fragment>;
+    });
+}
+
+function renderMessageBody(text: string) {
+    const lines = text.split("\n");
+    return lines.map((line, index) => (
+        <Fragment key={`line-${index}`}>
+            {renderInlineFormat(line)}
+            {index < lines.length - 1 ? <br /> : null}
+        </Fragment>
+    ));
 }
 
 export default function ConversacionesPage() {
@@ -870,12 +893,18 @@ export default function ConversacionesPage() {
                                                                 }))
                                                             }
                                                         />
-                                                        {mensaje.body ? <p>{mensaje.body}</p> : null}
+                                                        {mensaje.body ? (
+                                                            <p className="whitespace-pre-wrap break-words">{renderMessageBody(mensaje.body)}</p>
+                                                        ) : null}
                                                     </div>
                                                 ) : isImage ? (
-                                                    <p>{mensaje.body || "📷 Imagen"}</p>
+                                                    <p className="whitespace-pre-wrap break-words">
+                                                        {mensaje.body ? renderMessageBody(mensaje.body) : "📷 Imagen"}
+                                                    </p>
                                                 ) : (
-                                                    <p>{mensaje.body || "Mensaje sin texto"}</p>
+                                                    <p className="whitespace-pre-wrap break-words">
+                                                        {mensaje.body ? renderMessageBody(mensaje.body) : "Mensaje sin texto"}
+                                                    </p>
                                                 )}
                                                 <p
                                                     className={`mt-1 text-[10px] ${
