@@ -23,6 +23,7 @@ export interface ConversationMessage {
     body: string | null;
     timestamp: string;
     mediaType?: "image" | "audio" | null;
+    mediaUrl?: string | null;
     senderType: "ia" | "humano" | "cliente" | "sistema";
     interventionStatus: "activo" | "inactivo" | null;
     source: "meta" | "n8n";
@@ -77,7 +78,7 @@ type MetaWebhookMessage = {
         button_reply?: { title?: string };
         list_reply?: { title?: string };
     };
-    image?: { caption?: string };
+    image?: { id?: string; caption?: string; link?: string };
     audio?: Record<string, unknown>;
     sticker?: Record<string, unknown>;
     document?: { filename?: string };
@@ -355,6 +356,17 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
                     : raw?.mediaType === "audio" || raw?.type === "audio"
                       ? "audio"
                       : null,
+            mediaUrl:
+                raw?.type === "image" || raw?.mediaType === "image"
+                    ? (typeof raw?.imageUrl === "string" && raw.imageUrl.trim())
+                        || (typeof raw?.mediaUrl === "string" && raw.mediaUrl.trim())
+                        || (typeof raw?.image?.link === "string" && raw.image.link.trim())
+                        || (typeof raw?.image?.id === "string" && raw.image.id.trim()
+                            ? `/api/meta/media/${encodeURIComponent(raw.image.id.trim())}`
+                            : typeof raw?.mediaId === "string" && raw.mediaId.trim()
+                              ? `/api/meta/media/${encodeURIComponent(raw.mediaId.trim())}`
+                              : null)
+                    : null,
             senderType: inferSenderType(raw, direction),
             interventionStatus: inferInterventionStatus(raw),
             source: raw?.source === "n8n" ? "n8n" : "meta",
@@ -401,6 +413,8 @@ export async function persistOutboundMetaMessage(params: {
     body: string;
     messageId?: string;
     mediaType?: "image" | "audio";
+    mediaId?: string;
+    mediaUrl?: string;
     caption?: string;
     senderType?: "ia" | "humano" | "sistema";
     source?: "meta" | "n8n" | "dashboard";
@@ -437,6 +451,14 @@ export async function persistOutboundMetaMessage(params: {
             {
                 type: params.mediaType,
                 mediaType: params.mediaType,
+                mediaId: params.mediaId,
+                mediaUrl: params.mediaUrl,
+                image: params.mediaType === "image"
+                    ? {
+                        ...(params.mediaId ? { id: params.mediaId } : {}),
+                        ...(params.mediaUrl ? { link: params.mediaUrl } : {}),
+                    }
+                    : undefined,
                 caption: params.caption,
                 senderType: params.senderType || "ia",
                 source: params.source || "n8n",

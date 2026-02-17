@@ -21,6 +21,7 @@ interface ConversationMessage {
     body: string | null;
     timestamp: string;
     mediaType?: "image" | "audio" | null;
+    mediaUrl?: string | null;
     senderType: "ia" | "humano" | "cliente" | "sistema";
     interventionStatus: "activo" | "inactivo" | null;
     source: "meta" | "n8n";
@@ -81,6 +82,7 @@ export default function ConversacionesPage() {
     const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
     const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState<string | null>(null);
     const [imagePreviewByMessageId, setImagePreviewByMessageId] = useState<Record<string, string>>({});
+    const [brokenImageByMessageId, setBrokenImageByMessageId] = useState<Record<string, boolean>>({});
     const imageInputRef = useRef<HTMLInputElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -369,9 +371,10 @@ export default function ConversacionesPage() {
                 typeof data?.messageId === "string" &&
                 data.messageId
             ) {
+                const stablePreviewUrl = URL.createObjectURL(file);
                 setImagePreviewByMessageId((prev) => ({
                     ...prev,
-                    [data.messageId]: options.localPreviewUrl as string,
+                    [data.messageId]: stablePreviewUrl,
                 }));
             }
 
@@ -501,8 +504,13 @@ export default function ConversacionesPage() {
             mediaRecorderRef.current?.stop();
             mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
             if (selectedImagePreviewUrl) URL.revokeObjectURL(selectedImagePreviewUrl);
+            Object.values(imagePreviewByMessageId).forEach((url) => {
+                if (typeof url === "string" && url.startsWith("blob:")) {
+                    URL.revokeObjectURL(url);
+                }
+            });
         };
-    }, [selectedImagePreviewUrl]);
+    }, [selectedImagePreviewUrl, imagePreviewByMessageId]);
 
     const conversacionesFiltradas = useMemo(() => {
         const term = busqueda.trim().toLowerCase();
@@ -742,7 +750,13 @@ export default function ConversacionesPage() {
                                         >
                                             {(() => {
                                                 const previewUrl = imagePreviewByMessageId[mensaje.messageId];
-                                                const isImage = mensaje.mediaType === "image" || Boolean(previewUrl);
+                                                const remoteMediaUrl = mensaje.mediaUrl || null;
+                                                const imageUrl = remoteMediaUrl || previewUrl;
+                                                const isImage =
+                                                    mensaje.mediaType === "image" ||
+                                                    Boolean(previewUrl) ||
+                                                    Boolean(remoteMediaUrl);
+                                                const imageFailed = Boolean(brokenImageByMessageId[mensaje.messageId]);
                                                 return (
                                             <div
                                                 className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
@@ -773,15 +787,23 @@ export default function ConversacionesPage() {
                                                         </span>
                                                     )}
                                                 </div>
-                                                {isImage && previewUrl ? (
+                                                {isImage && imageUrl && !imageFailed ? (
                                                     <div className="space-y-2">
                                                         <img
-                                                            src={previewUrl}
+                                                            src={imageUrl}
                                                             alt={mensaje.body || "Imagen enviada"}
                                                             className="max-h-64 w-auto rounded-xl border border-white/20"
+                                                            onError={() =>
+                                                                setBrokenImageByMessageId((prev) => ({
+                                                                    ...prev,
+                                                                    [mensaje.messageId]: true,
+                                                                }))
+                                                            }
                                                         />
                                                         {mensaje.body ? <p>{mensaje.body}</p> : null}
                                                     </div>
+                                                ) : isImage ? (
+                                                    <p>{mensaje.body || "📷 Imagen"}</p>
                                                 ) : (
                                                     <p>{mensaje.body || "Mensaje sin texto"}</p>
                                                 )}
