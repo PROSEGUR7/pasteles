@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
+function isDbConnectivityError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const candidate = error as { code?: string; errors?: Array<{ code?: string }> };
+    const dbCodes = new Set(['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT']);
+
+    if (candidate.code && dbCodes.has(candidate.code)) return true;
+    if (Array.isArray(candidate.errors)) {
+        return candidate.errors.some((nested) => !!nested?.code && dbCodes.has(nested.code));
+    }
+    return false;
+}
+
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
@@ -10,6 +22,10 @@ export async function GET(request: NextRequest) {
         );
         return NextResponse.json(result.rows);
     } catch (error) {
+        if (isDbConnectivityError(error)) {
+            console.warn('[Productos] Base de datos no disponible. Respuesta vacía temporal.');
+            return NextResponse.json([]);
+        }
         console.error('Productos error:', error);
         return NextResponse.json({ error: 'Error al obtener productos' }, { status: 500 });
     }

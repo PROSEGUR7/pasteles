@@ -82,12 +82,25 @@ export default function ConversacionesPage() {
                 if (!silent) setLoadingConvs(true);
                 const query = filtro !== "Todos" ? `?canal=${encodeURIComponent(filtro)}` : "";
                 const res = await fetch(`/api/conversaciones${query}`, { cache: "no-store" });
-                if (!res.ok) throw new Error("Error cargando conversaciones");
+                if (!res.ok) {
+                    let backendMessage = "No pudimos cargar las conversaciones";
+                    try {
+                        const errorData = await res.json();
+                        if (typeof errorData?.error === "string") {
+                            backendMessage = errorData.error;
+                        }
+                    } catch {
+                        // noop
+                    }
+                    setConversaciones([]);
+                    setError(backendMessage);
+                    return;
+                }
                 const data = await res.json();
                 setConversaciones(data.conversations || []);
                 setError(null);
-            } catch (err) {
-                console.error("[Conversaciones] Fetch error", err);
+            } catch {
+                setConversaciones([]);
                 setError("No pudimos cargar las conversaciones");
             } finally {
                 if (!silent) setLoadingConvs(false);

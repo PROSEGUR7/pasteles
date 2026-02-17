@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import pool from "@/lib/db";
 
+function isDbConnectivityError(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const candidate = error as { code?: string; errors?: Array<{ code?: string }> };
+    const dbCodes = new Set(["ECONNREFUSED", "ENOTFOUND", "ECONNRESET", "ETIMEDOUT"]);
+
+    if (candidate.code && dbCodes.has(candidate.code)) return true;
+    if (Array.isArray(candidate.errors)) {
+        return candidate.errors.some((nested) => !!nested?.code && dbCodes.has(nested.code));
+    }
+    return false;
+}
+
 export async function GET() {
     try {
         const result = await pool.query(
@@ -29,6 +41,10 @@ export async function GET() {
 
         return NextResponse.json({ clientes });
     } catch (error) {
+        if (isDbConnectivityError(error)) {
+            console.warn("[Clientes] Base de datos no disponible. Respuesta vacía temporal.");
+            return NextResponse.json({ clientes: [], degraded: true });
+        }
         console.error("[Clientes] Error listando:", error);
         return NextResponse.json({ error: "No se pudieron obtener los clientes" }, { status: 500 });
     }

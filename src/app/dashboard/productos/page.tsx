@@ -42,13 +42,37 @@ export default function ProductosPage() {
     });
     const [error, setError] = useState("");
 
-    const fetchProductos = () => {
+    const fetchProductos = async () => {
         setLoading(true);
         const params = showInactivos ? "?include_inactive=1" : "";
-        fetch(`/api/productos${params}`)
-            .then((r) => r.json())
-            .then((data) => { setProductos(data); setLoading(false); })
-            .catch(() => setLoading(false));
+        try {
+            const res = await fetch(`/api/productos${params}`, { cache: "no-store" });
+
+            if (!res.ok) {
+                let backendMessage = "No se pudieron cargar los productos";
+                try {
+                    const errorData = await res.json();
+                    if (typeof errorData?.error === "string") {
+                        backendMessage = errorData.error;
+                    }
+                } catch {
+                    // noop
+                }
+                setProductos([]);
+                setError(backendMessage);
+                return;
+            }
+
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : [];
+            setProductos(list);
+            setError("");
+        } catch {
+            setProductos([]);
+            setError("Error al cargar productos");
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => {

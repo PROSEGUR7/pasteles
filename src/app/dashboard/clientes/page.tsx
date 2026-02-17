@@ -34,12 +34,25 @@ export default function ClientesPage() {
         try {
             setLoading(true);
             const res = await fetch("/api/clientes", { cache: "no-store" });
-            if (!res.ok) throw new Error("No se pudieron cargar los clientes");
+            if (!res.ok) {
+                let backendMessage = "No pudimos cargar los clientes";
+                try {
+                    const errorData = await res.json();
+                    if (typeof errorData?.error === "string") {
+                        backendMessage = errorData.error;
+                    }
+                } catch {
+                    // noop
+                }
+                setClientes([]);
+                setError(backendMessage);
+                return;
+            }
             const data = await res.json();
             setClientes(data.clientes || []);
             setError(null);
-        } catch (err) {
-            console.error("[Clientes] Error", err);
+        } catch {
+            setClientes([]);
             setError("No pudimos cargar los clientes");
         } finally {
             setLoading(false);

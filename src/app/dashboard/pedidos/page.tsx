@@ -75,6 +75,9 @@ export default function PedidosPage() {
     const inicializadoRef = useRef(false);
 
     const reproducirAlertaCancelacion = useCallback(() => {
+        const alertAudio = new Audio("/sounds/alert.mp3");
+        alertAudio.volume = 1;
+        alertAudio.play().catch(() => {
         const audioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!audioContextClass) return;
 
@@ -104,6 +107,7 @@ export default function PedidosPage() {
         setTimeout(() => {
             context.close().catch(() => { });
         }, 350);
+        });
     }, []);
 
     const fetchPedidos = useCallback(async (page = 1, options?: { silent?: boolean; detectarCancelados?: boolean }) => {
@@ -212,12 +216,21 @@ export default function PedidosPage() {
     const cambiarEstado = async (id: number, nuevoEstado: string) => {
         setUpdatingEstado(id);
         try {
+            const pedidoActual = pedidos.find((pedido) => pedido.id_pedido === id);
             const res = await fetch(`/api/pedidos/${id}/estado`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ estado: nuevoEstado }),
             });
             if (res.ok) {
+                if (nuevoEstado === "cancelado" && pedidoActual?.estado !== "cancelado") {
+                    setCancelAlert({
+                        id,
+                        ticket: pedidoActual?.numero_ticket || `#${id}`,
+                        cliente: pedidoActual?.cliente_nombre || "Sin cliente",
+                    });
+                    reproducirAlertaCancelacion();
+                }
                 fetchPedidos(pagination.page);
                 setMenuAccionesAbierto(null);
                 if (detalle?.pedido && detalle.pedido.id_pedido === id) {
