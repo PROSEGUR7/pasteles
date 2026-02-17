@@ -11,16 +11,18 @@ export const runtime = "nodejs";
 
 type SenderType = "ia" | "humano" | "sistema";
 
-async function transcodeWebmToMp3(inputFile: File): Promise<File> {
+async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
     if (!ffmpegPath) {
-        throw new Error("No hay ffmpeg disponible para convertir audio. Sube el audio como archivo (.mp3/.ogg/.m4a). (HTTP 400)");
+        throw new Error(
+            "No hay ffmpeg disponible para convertir audio. Sube el audio como archivo (.mp3/.ogg/.m4a). (HTTP 400)"
+        );
     }
 
     const ffmpegBinary = ffmpegPath;
 
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), "pasteles-audio-"));
-    const inPath = path.join(tmpDir, "input.webm");
-    const outPath = path.join(tmpDir, "output.mp3");
+    const inPath = path.join(tmpDir, "input.bin");
+    const outPath = path.join(tmpDir, "output.ogg");
 
     try {
         const buffer = Buffer.from(await inputFile.arrayBuffer());
@@ -34,12 +36,12 @@ async function transcodeWebmToMp3(inputFile: File): Promise<File> {
                     "-i",
                     inPath,
                     "-vn",
-                    "-ac",
-                    "1",
-                    "-ar",
-                    "44100",
+                    "-c:a",
+                    "libopus",
                     "-b:a",
-                    "64k",
+                    "24k",
+                    "-vbr",
+                    "on",
                     outPath,
                 ],
                 (error, _stdout, stderr) => {
@@ -53,8 +55,8 @@ async function transcodeWebmToMp3(inputFile: File): Promise<File> {
             );
         });
 
-        const mp3Buffer = await readFile(outPath);
-        return new File([mp3Buffer], `audio-${Date.now()}.mp3`, { type: "audio/mpeg" });
+        const oggBuffer = await readFile(outPath);
+        return new File([oggBuffer], `audio-${Date.now()}.ogg`, { type: "audio/ogg" });
     } finally {
         await rm(tmpDir, { recursive: true, force: true }).catch(() => null);
     }
@@ -106,9 +108,15 @@ export async function POST(request: NextRequest) {
             let uploadFile = file;
             if (
                 type === "audio" &&
-                (file.type?.toLowerCase().includes("webm") || file.name?.toLowerCase().endsWith(".webm"))
+                (
+                    file.type?.toLowerCase().includes("webm") ||
+                    file.type?.toLowerCase().includes("mp4") ||
+                    file.name?.toLowerCase().endsWith(".webm") ||
+                    file.name?.toLowerCase().endsWith(".m4a") ||
+                    file.name?.toLowerCase().endsWith(".mp4")
+                )
             ) {
-                uploadFile = await transcodeWebmToMp3(file);
+                uploadFile = await transcodeAudioToOggOpus(file);
             }
 
             const uploaded = await uploadMetaMedia(uploadFile);
