@@ -1,5 +1,9 @@
 import pool from "@/lib/db";
 
+function createLocalMessageId() {
+    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 let tablesReady = false;
 
 export interface ConversationSummary {
@@ -382,4 +386,52 @@ export async function setMetaConversationBotStatus(
          WHERE wa_id = $1;`,
         [waId, botStatus]
     );
+}
+
+export async function persistOutboundMetaMessage(params: {
+    waId: string;
+    nombre?: string;
+    body: string;
+    messageId?: string;
+    senderType?: "ia" | "humano" | "sistema";
+    source?: "meta" | "n8n" | "dashboard";
+}) {
+    await ensureMetaTables();
+
+    const waId = params.waId.trim();
+    const nombre = (params.nombre || waId).trim() || waId;
+    const body = params.body;
+    const messageId = params.messageId || createLocalMessageId();
+    const now = new Date();
+
+    await pool.query(
+        `INSERT INTO meta_conversations (wa_id, nombre, canal, last_message, last_message_at, estado, closed_at)
+         VALUES ($1, $2, 'WhatsApp', $3, $4, 'abierto', NULL)
+         ON CONFLICT (wa_id)
+         DO UPDATE SET nombre = EXCLUDED.nombre,
+                       last_message = EXCLUDED.last_message,
+                       last_message_at = EXCLUDED.last_message_at,
+                       estado = 'abierto',
+                       closed_at = NULL;`,
+        [waId, nombre, body, now.toISOString()]
+    );
+
+    await pool.query(
+        `INSERT INTO meta_messages (wa_id, message_id, direction, body, timestamp, raw, read_at)
+         VALUES ($1, $2, 'outbound', $3, $4, $5, NOW())
+         ON CONFLICT (message_id) DO NOTHING;`,
+        [
+            waId,
+            messageId,
+            body,
+            now.toISOString(),
+            {
+                senderType: params.senderType || "ia",
+                source: params.source || "n8n",
+                persistedBy: "fullstack",
+            },
+        ]
+    );
+
+    return { messageId };
 }

@@ -75,6 +75,7 @@ export default function ConversacionesPage() {
     const [actionError, setActionError] = useState<string | null>(null);
     const [updatingBot, setUpdatingBot] = useState(false);
     const [draftMessage, setDraftMessage] = useState("");
+    const [sendingMessage, setSendingMessage] = useState(false);
 
     const fetchConversaciones = useCallback(
         async (silent = false) => {
@@ -239,6 +240,52 @@ export default function ConversacionesPage() {
             setUpdatingBot(false);
         }
     }, [conversacionActiva, updatingBot]);
+
+    const handleEnviarMensaje = useCallback(async () => {
+        if (!conversacionActiva) return;
+        const message = draftMessage.trim();
+        if (!message || inputBloqueado || sendingMessage) return;
+
+        try {
+            setActionError(null);
+            setSendingMessage(true);
+
+            const res = await fetch("/api/meta/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    waId: conversacionActiva.waId,
+                    nombre: conversacionActiva.nombre,
+                    message,
+                    senderType: "humano",
+                    source: "dashboard",
+                }),
+            });
+
+            if (!res.ok) {
+                let backendMessage = "No se pudo enviar el mensaje";
+                try {
+                    const data = await res.json();
+                    if (typeof data?.error === "string") backendMessage = data.error;
+                } catch {
+                    // noop
+                }
+                throw new Error(backendMessage);
+            }
+
+            setDraftMessage("");
+            await fetchMensajes(conversacionActiva.waId);
+            fetchConversaciones(true);
+        } catch (err) {
+            setActionError(
+                err instanceof Error && err.message
+                    ? err.message
+                    : "No se pudo enviar el mensaje"
+            );
+        } finally {
+            setSendingMessage(false);
+        }
+    }, [conversacionActiva, draftMessage, inputBloqueado, sendingMessage, fetchMensajes, fetchConversaciones]);
 
     useEffect(() => {
         fetchConversaciones();
@@ -558,14 +605,24 @@ export default function ConversacionesPage() {
                                         <input
                                             value={draftMessage}
                                             onChange={(e) => setDraftMessage(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleEnviarMensaje();
+                                                }
+                                            }}
                                             className={`flex-1 input-field ${
                                                 inputBloqueado ? "bg-surface-100 text-surface-500" : "bg-white"
                                             }`}
                                             placeholder={`Escribe un mensaje para ${conversacionActiva.nombre}`}
                                             disabled={inputBloqueado}
                                         />
-                                        <button className="btn-primary whitespace-nowrap" disabled={inputBloqueado}>
-                                            Enviar
+                                        <button
+                                            onClick={handleEnviarMensaje}
+                                            className="btn-primary whitespace-nowrap"
+                                            disabled={inputBloqueado || sendingMessage || !draftMessage.trim()}
+                                        >
+                                            {sendingMessage ? "Enviando..." : "Enviar"}
                                         </button>
                                     </div>
                                     <p className="text-[11px] text-surface-400 mt-2">
