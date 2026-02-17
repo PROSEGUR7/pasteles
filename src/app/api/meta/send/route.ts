@@ -24,7 +24,33 @@ async function sanitizeFileForMetaUpload(file: File) {
     return new File([buffer], file.name || `upload-${Date.now()}.bin`, { type: normalizedType });
 }
 
-function shouldTranscodeAudio(file: File) {
+type AudioContainer = "ogg" | "webm" | "mp4" | "mp3" | "wav" | "unknown";
+
+function sniffAudioContainer(buffer: Buffer): AudioContainer {
+    if (!buffer || buffer.length < 12) return "unknown";
+
+    // OGG
+    if (buffer.slice(0, 4).toString("ascii") === "OggS") return "ogg";
+
+    // EBML / WebM
+    if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return "webm";
+
+    // WAV (RIFF....WAVE)
+    if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WAVE") {
+        return "wav";
+    }
+
+    // MP3
+    if (buffer.slice(0, 3).toString("ascii") === "ID3") return "mp3";
+    if (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return "mp3";
+
+    // MP4/M4A (....ftyp)
+    if (buffer.slice(4, 8).toString("ascii") === "ftyp") return "mp4";
+
+    return "unknown";
+}
+
+async function shouldTranscodeAudio(file: File) {
     const mime = (file.type || "").toLowerCase();
     const normalized = normalizeMimeType(mime);
     const name = (file.name || "").toLowerCase();
@@ -35,6 +61,23 @@ function shouldTranscodeAudio(file: File) {
         return true;
     }
     if (mime.includes("webm") || mime.includes("mp4") || mime.includes("opus")) return true;
+
+    // If the file is mislabeled (common with MediaRecorder), detect by magic bytes.
+    try {
+        const headBuffer = Buffer.from(await file.slice(0, 64).arrayBuffer());
+        const container = sniffAudioContainer(headBuffer);
+
+        // Only skip transcoding when it's a real OGG container.
+        if (container === "ogg") return false;
+
+        // WebM/MP4 are frequently accepted by upload but not reliably delivered as voice notes.
+        if (container === "webm" || container === "mp4") return true;
+
+        // Unknown -> transcode to be safe.
+        if (container === "unknown") return true;
+    } catch {
+        // If sniffing fails, keep existing heuristic result.
+    }
 
     return false;
 }
@@ -136,7 +179,7 @@ export async function POST(request: NextRequest) {
             let uploadFile = file;
             if (
                 type === "audio" &&
-                shouldTranscodeAudio(file)
+                (await shouldTranscodeAudio(file))
             ) {
                 uploadFile = await transcodeAudioToOggOpus(file);
             }
