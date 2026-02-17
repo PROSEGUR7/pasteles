@@ -17,23 +17,103 @@ interface Stats {
     ventasPorSede: Array<{ sede: string; total: number; pedidos: number }>;
 }
 
+const EMPTY_STATS: Stats = {
+    ventasHoy: { total: 0, pedidos: 0 },
+    ventasTotal: { total: 0, pedidos: 0 },
+    porEstado: [],
+    ventasSemana: [],
+    topProductos: [],
+    recientes: [],
+    ventasPorSede: [],
+};
+
+const toNumber = (value: unknown): number => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value === "string") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+};
+
+const normalizeStats = (value: unknown): Stats => {
+    if (!value || typeof value !== "object") return EMPTY_STATS;
+    const raw = value as Partial<Stats>;
+
+    return {
+        ventasHoy: {
+            total: toNumber(raw.ventasHoy?.total),
+            pedidos: toNumber(raw.ventasHoy?.pedidos),
+        },
+        ventasTotal: {
+            total: toNumber(raw.ventasTotal?.total),
+            pedidos: toNumber(raw.ventasTotal?.pedidos),
+        },
+        porEstado: Array.isArray(raw.porEstado)
+            ? raw.porEstado.map((row) => ({
+                estado: String(row?.estado ?? ""),
+                cantidad: String(row?.cantidad ?? "0"),
+            }))
+            : [],
+        ventasSemana: Array.isArray(raw.ventasSemana)
+            ? raw.ventasSemana.map((row) => ({
+                dia: String(row?.dia ?? ""),
+                total: toNumber(row?.total),
+                pedidos: toNumber(row?.pedidos),
+            }))
+            : [],
+        topProductos: Array.isArray(raw.topProductos)
+            ? raw.topProductos.map((row) => ({
+                nombre: String(row?.nombre ?? ""),
+                vendido: toNumber(row?.vendido),
+                ingreso: toNumber(row?.ingreso),
+            }))
+            : [],
+        recientes: Array.isArray(raw.recientes)
+            ? raw.recientes.map((row) => ({
+                id_pedido: toNumber(row?.id_pedido),
+                numero_ticket: String(row?.numero_ticket ?? ""),
+                cliente_nombre: String(row?.cliente_nombre ?? ""),
+                sede_nombre: String(row?.sede_nombre ?? ""),
+                estado: String(row?.estado ?? ""),
+                total: String(row?.total ?? "0"),
+                fecha: String(row?.fecha ?? ""),
+            }))
+            : [],
+        ventasPorSede: Array.isArray(raw.ventasPorSede)
+            ? raw.ventasPorSede.map((row) => ({
+                sede: String(row?.sede ?? ""),
+                total: toNumber(row?.total),
+                pedidos: toNumber(row?.pedidos),
+            }))
+            : [],
+    };
+};
+
 const formatCOP = (val: number) =>
     new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(val);
 
 const CHART_COLORS = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff7ed", "#ea580c", "#c2410c"];
 
 export default function DashboardPage() {
-    const [stats, setStats] = useState<Stats | null>(null);
+    const [stats, setStats] = useState<Stats>(EMPTY_STATS);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetch("/api/dashboard/stats")
-            .then((r) => r.json())
+            .then(async (r) => {
+                if (!r.ok) return EMPTY_STATS;
+                const data = await r.json();
+                return normalizeStats(data);
+            })
             .then((data) => {
                 setStats(data);
                 setLoading(false);
             })
-            .catch(() => setLoading(false));
+            .catch(() => {
+                setStats(EMPTY_STATS);
+                setLoading(false);
+            });
     }, []);
 
     if (loading) {
@@ -48,8 +128,6 @@ export default function DashboardPage() {
             </div>
         );
     }
-
-    if (!stats) return null;
 
     const kpiCards = [
         {
