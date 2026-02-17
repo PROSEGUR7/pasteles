@@ -516,15 +516,15 @@ export default function ConversacionesPage() {
             mediaStreamRef.current = stream;
 
             const preferredMimeTypes = [
-                "audio/webm;codecs=opus",
-                "audio/webm",
                 "audio/ogg;codecs=opus",
                 "audio/ogg",
                 "audio/mp4",
-                "audio/aac",
                 "audio/mpeg",
+                "audio/aac",
                 "audio/amr",
                 "audio/opus",
+                "audio/webm;codecs=opus",
+                "audio/webm",
             ];
 
             const supportedMime = preferredMimeTypes.find((mime) => MediaRecorder.isTypeSupported(mime));
@@ -908,7 +908,9 @@ export default function ConversacionesPage() {
                                                     /^📷\s*/.test(bodyText);
                                                 const isAudio =
                                                     mensaje.mediaType === "audio" ||
-                                                    /^🎵\s*audio/i.test(bodyText);
+                                                    /^🎵\s*audio/i.test(bodyText) ||
+                                                    /^\s*audio\b/i.test(bodyText) ||
+                                                    /\baudio\s*\([^)]*\.(m4a|mp3|ogg|opus|webm)\)/i.test(bodyText);
                                                 const audioUrl = isAudio ? remoteMediaUrl : null;
                                                 const imageFailed = Boolean(brokenImageByMessageId[mensaje.messageId]);
                                                 return (

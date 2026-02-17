@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const sede = searchParams.get('sede');
         const estado = searchParams.get('estado');
+        const cliente = searchParams.get('cliente') || searchParams.get('clienteId') || searchParams.get('id_cliente');
         const fechaInicio = searchParams.get('fecha_inicio');
         const fechaFin = searchParams.get('fecha_fin');
         const page = parseInt(searchParams.get('page') || '1');
@@ -23,6 +24,13 @@ export async function GET(request: NextRequest) {
         if (estado) {
             whereClause += ` AND p.estado = $${paramIndex++}`;
             params.push(estado);
+        }
+        if (cliente) {
+            const clienteId = parseInt(cliente);
+            if (!Number.isNaN(clienteId)) {
+                whereClause += ` AND p.id_cliente = $${paramIndex++}`;
+                params.push(clienteId);
+            }
         }
         if (fechaInicio) {
             whereClause += ` AND p.fecha >= $${paramIndex++}`;
