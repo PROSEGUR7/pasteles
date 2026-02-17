@@ -344,6 +344,10 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
 
     return metaResult.rows.map((row) => {
         const raw = (row.raw || {}) as Record<string, unknown>;
+        const rawImage =
+            raw && typeof raw.image === "object" && raw.image !== null
+                ? (raw.image as { id?: string; link?: string })
+                : undefined;
         const direction = row.direction as "inbound" | "outbound";
         return {
             messageId: row.message_id,
@@ -360,9 +364,9 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
                 raw?.type === "image" || raw?.mediaType === "image"
                     ? (typeof raw?.imageUrl === "string" && raw.imageUrl.trim())
                         || (typeof raw?.mediaUrl === "string" && raw.mediaUrl.trim())
-                        || (typeof raw?.image?.link === "string" && raw.image.link.trim())
-                        || (typeof raw?.image?.id === "string" && raw.image.id.trim()
-                            ? `/api/meta/media/${encodeURIComponent(raw.image.id.trim())}`
+                        || (typeof rawImage?.link === "string" && rawImage.link.trim())
+                        || (typeof rawImage?.id === "string" && rawImage.id.trim()
+                            ? `/api/meta/media/${encodeURIComponent(rawImage.id.trim())}`
                             : typeof raw?.mediaId === "string" && raw.mediaId.trim()
                               ? `/api/meta/media/${encodeURIComponent(raw.mediaId.trim())}`
                               : null)
