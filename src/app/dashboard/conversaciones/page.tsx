@@ -503,6 +503,11 @@ export default function ConversacionesPage() {
         if (inputBloqueado || sendingMessage) return;
 
         if (recordingAudio) {
+            try {
+                mediaRecorderRef.current?.requestData();
+            } catch {
+                // ignore
+            }
             mediaRecorderRef.current?.stop();
             return;
         }
@@ -560,6 +565,14 @@ export default function ConversacionesPage() {
                 const recorderMimeType = recorder.mimeType || supportedMime || "audio/webm";
                 const normalizedMimeType = recorderMimeType.split(";")[0]?.trim() || recorderMimeType;
                 const blob = new Blob(chunks, { type: normalizedMimeType });
+
+                if (!blob.size || blob.size < 1024) {
+                    setActionError(
+                        "La grabación quedó vacía o demasiado corta. Mantén presionado Grabar al menos 1-2 segundos y vuelve a intentar."
+                    );
+                    return;
+                }
+
                 const extension = normalizedMimeType.includes("ogg")
                     ? "ogg"
                     : normalizedMimeType.includes("mp4")
