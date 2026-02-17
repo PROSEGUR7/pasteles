@@ -22,6 +22,7 @@ export interface ConversationMessage {
     direction: "inbound" | "outbound";
     body: string | null;
     timestamp: string;
+    mediaType?: "image" | "audio" | null;
     senderType: "ia" | "humano" | "cliente" | "sistema";
     interventionStatus: "activo" | "inactivo" | null;
     source: "meta" | "n8n";
@@ -348,9 +349,15 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
             direction,
             body: row.body,
             timestamp: row.timestamp,
+            mediaType:
+                raw?.mediaType === "image" || raw?.type === "image"
+                    ? "image"
+                    : raw?.mediaType === "audio" || raw?.type === "audio"
+                      ? "audio"
+                      : null,
             senderType: inferSenderType(raw, direction),
             interventionStatus: inferInterventionStatus(raw),
-            source: "meta",
+            source: raw?.source === "n8n" ? "n8n" : "meta",
         };
     });
 }
@@ -393,6 +400,8 @@ export async function persistOutboundMetaMessage(params: {
     nombre?: string;
     body: string;
     messageId?: string;
+    mediaType?: "image" | "audio";
+    caption?: string;
     senderType?: "ia" | "humano" | "sistema";
     source?: "meta" | "n8n" | "dashboard";
 }) {
@@ -426,6 +435,9 @@ export async function persistOutboundMetaMessage(params: {
             body,
             now.toISOString(),
             {
+                type: params.mediaType,
+                mediaType: params.mediaType,
+                caption: params.caption,
                 senderType: params.senderType || "ia",
                 source: params.source || "n8n",
                 persistedBy: "fullstack",

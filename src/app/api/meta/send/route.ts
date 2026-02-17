@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendMetaMessage } from "@/lib/metaApi";
+import { sendMetaMessage, uploadMetaMedia } from "@/lib/metaApi";
 import { persistOutboundMetaMessage } from "@/lib/metaStore";
 
 export const runtime = "nodejs";
@@ -26,6 +26,56 @@ export async function POST(request: NextRequest) {
     try {
         if (!isAuthorized(request)) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const contentType = request.headers.get("content-type") || "";
+
+        if (contentType.includes("multipart/form-data")) {
+            const form = await request.formData();
+            const waId = String(form.get("waId") || form.get("to") || form.get("phone") || "").trim();
+            const nombre = String(form.get("nombre") || "").trim() || undefined;
+            const typeRaw = String(form.get("type") || "image").trim().toLowerCase();
+            const type = typeRaw === "audio" ? "audio" : "image";
+            const senderType = String(form.get("senderType") || "humano") as SenderType;
+            const source = String(form.get("source") || "dashboard") as "n8n" | "dashboard" | "meta";
+            const caption = String(form.get("caption") || "").trim();
+            const file = form.get("file");
+
+            if (!waId) {
+                return NextResponse.json({ error: "waId/to es requerido" }, { status: 400 });
+            }
+
+            if (!(file instanceof File)) {
+                return NextResponse.json({ error: "file es requerido para multipart" }, { status: 400 });
+            }
+
+            const uploaded = await uploadMetaMedia(file);
+            const sent = await sendMetaMessage(
+                type === "audio"
+                    ? { to: waId, type: "audio", mediaId: uploaded.mediaId }
+                    : { to: waId, type: "image", mediaId: uploaded.mediaId, caption: caption || undefined }
+            );
+
+            const previewBody = type === "audio" ? `🎵 Audio (${file.name || "sin nombre"})` : (caption || `📷 Imagen (${file.name || "sin nombre"})`);
+
+            await persistOutboundMetaMessage({
+                waId,
+                nombre,
+                body: previewBody,
+                messageId: sent.messageId,
+                mediaType: type,
+                caption: caption || undefined,
+                senderType,
+                source,
+            });
+
+            return NextResponse.json({
+                ok: true,
+                to: waId,
+                type,
+                messageId: sent.messageId || null,
+                mediaId: uploaded.mediaId,
+            });
         }
 
         const body = (await request.json()) as {
@@ -93,6 +143,8 @@ export async function POST(request: NextRequest) {
             nombre: body.nombre,
             body: previewBody,
             messageId: sent.messageId,
+            mediaType: type === "image" || type === "audio" ? type : undefined,
+            caption: type === "image" ? body.caption : undefined,
             senderType: body.senderType || "ia",
             source: body.source || "n8n",
         });

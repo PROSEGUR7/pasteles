@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type FiltroCanal = "Todos" | "WhatsApp" | "Instagram" | "Web";
 
@@ -20,6 +20,7 @@ interface ConversationMessage {
     direction: "inbound" | "outbound";
     body: string | null;
     timestamp: string;
+    mediaType?: "image" | "audio" | null;
     senderType: "ia" | "humano" | "cliente" | "sistema";
     interventionStatus: "activo" | "inactivo" | null;
     source: "meta" | "n8n";
@@ -76,6 +77,13 @@ export default function ConversacionesPage() {
     const [updatingBot, setUpdatingBot] = useState(false);
     const [draftMessage, setDraftMessage] = useState("");
     const [sendingMessage, setSendingMessage] = useState(false);
+    const [recordingAudio, setRecordingAudio] = useState(false);
+    const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+    const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState<string | null>(null);
+    const [imagePreviewByMessageId, setImagePreviewByMessageId] = useState<Record<string, string>>({});
+    const imageInputRef = useRef<HTMLInputElement | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
 
     const fetchConversaciones = useCallback(
         async (silent = false) => {
@@ -241,10 +249,30 @@ export default function ConversacionesPage() {
         }
     }, [conversacionActiva, updatingBot]);
 
+    const handleLimpiarAdjuntoImagen = useCallback(() => {
+        setSelectedImageFile(null);
+        setSelectedImagePreviewUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+        });
+    }, []);
+
     const handleEnviarMensaje = useCallback(async () => {
         if (!conversacionActiva) return;
         const message = draftMessage.trim();
-        if (!message || inputBloqueado || sendingMessage) return;
+        if (inputBloqueado || sendingMessage) return;
+
+        if (selectedImageFile) {
+            await sendMediaFile("image", selectedImageFile, {
+                caption: message || undefined,
+                localPreviewUrl: selectedImagePreviewUrl || undefined,
+            });
+            setDraftMessage("");
+            handleLimpiarAdjuntoImagen();
+            return;
+        }
+
+        if (!message) return;
 
         try {
             setActionError(null);
@@ -285,68 +313,161 @@ export default function ConversacionesPage() {
         } finally {
             setSendingMessage(false);
         }
-    }, [conversacionActiva, draftMessage, inputBloqueado, sendingMessage, fetchMensajes, fetchConversaciones]);
+    }, [
+        conversacionActiva,
+        draftMessage,
+        inputBloqueado,
+        sendingMessage,
+        selectedImageFile,
+        selectedImagePreviewUrl,
+        fetchMensajes,
+        fetchConversaciones,
+        handleLimpiarAdjuntoImagen,
+    ]);
 
-    const handleEnviarMedia = useCallback(
-        async (type: "image" | "audio") => {
-            if (!conversacionActiva || inputBloqueado || sendingMessage) return;
+    async function sendMediaFile(
+        type: "image" | "audio",
+        file: File,
+        options?: { caption?: string; localPreviewUrl?: string }
+    ) {
+        if (!conversacionActiva || inputBloqueado || sendingMessage) return;
 
-            const label = type === "image" ? "imagen" : "audio";
-            const url = window.prompt(`Pega la URL pública del ${label}:`)?.trim();
-            if (!url) return;
+        const label = type === "image" ? "imagen" : "audio";
+        try {
+            setActionError(null);
+            setSendingMessage(true);
 
-            try {
-                setActionError(null);
-                setSendingMessage(true);
+            const formData = new FormData();
+            formData.append("waId", conversacionActiva.waId);
+            formData.append("nombre", conversacionActiva.nombre);
+            formData.append("type", type);
+            formData.append("senderType", "humano");
+            formData.append("source", "dashboard");
+            if (options?.caption) formData.append("caption", options.caption);
+            formData.append("file", file, file.name || `${type}.bin`);
 
-                const payload =
-                    type === "image"
-                        ? {
-                              waId: conversacionActiva.waId,
-                              nombre: conversacionActiva.nombre,
-                              type: "image" as const,
-                              imageUrl: url,
-                              senderType: "humano" as const,
-                              source: "dashboard" as const,
-                          }
-                        : {
-                              waId: conversacionActiva.waId,
-                              nombre: conversacionActiva.nombre,
-                              type: "audio" as const,
-                              audioUrl: url,
-                              senderType: "humano" as const,
-                              source: "dashboard" as const,
-                          };
+            const res = await fetch("/api/meta/send", {
+                method: "POST",
+                body: formData,
+            });
 
-                const res = await fetch("/api/meta/send", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                });
-
-                if (!res.ok) {
-                    let backendMessage = `No se pudo enviar ${label}`;
-                    try {
-                        const data = await res.json();
-                        if (typeof data?.error === "string") backendMessage = data.error;
-                    } catch {
-                        // noop
-                    }
-                    throw new Error(backendMessage);
+            if (!res.ok) {
+                let backendMessage = `No se pudo enviar ${label}`;
+                try {
+                    const data = await res.json();
+                    if (typeof data?.error === "string") backendMessage = data.error;
+                } catch {
+                    // noop
                 }
-
-                await fetchMensajes(conversacionActiva.waId);
-                fetchConversaciones(true);
-            } catch (err) {
-                setActionError(
-                    err instanceof Error && err.message ? err.message : `No se pudo enviar ${label}`
-                );
-            } finally {
-                setSendingMessage(false);
+                throw new Error(backendMessage);
             }
+
+            const data = await res.json();
+            if (
+                type === "image" &&
+                options?.localPreviewUrl &&
+                typeof data?.messageId === "string" &&
+                data.messageId
+            ) {
+                setImagePreviewByMessageId((prev) => ({
+                    ...prev,
+                    [data.messageId]: options.localPreviewUrl as string,
+                }));
+            }
+
+            await fetchMensajes(conversacionActiva.waId);
+            fetchConversaciones(true);
+        } catch (err) {
+            setActionError(
+                err instanceof Error && err.message ? err.message : `No se pudo enviar ${label}`
+            );
+        } finally {
+            setSendingMessage(false);
+        }
+    }
+
+    const handleSeleccionarImagen = useCallback(() => {
+        if (inputBloqueado || sendingMessage) return;
+        imageInputRef.current?.click();
+    }, [inputBloqueado, sendingMessage]);
+
+    const handleImagenSeleccionada = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            setSelectedImageFile(file);
+            setSelectedImagePreviewUrl((prev) => {
+                if (prev) URL.revokeObjectURL(prev);
+                return URL.createObjectURL(file);
+            });
         },
-        [conversacionActiva, inputBloqueado, sendingMessage, fetchMensajes, fetchConversaciones]
+        []
     );
+
+    const handleAudioDesdeMicrofono = useCallback(async () => {
+        if (inputBloqueado || sendingMessage) return;
+
+        if (recordingAudio) {
+            mediaRecorderRef.current?.stop();
+            return;
+        }
+
+        try {
+            if (!("mediaDevices" in navigator) || !navigator.mediaDevices?.getUserMedia) {
+                throw new Error("Tu navegador no permite grabar audio desde micrófono");
+            }
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+
+            const preferredMimeTypes = [
+                "audio/ogg;codecs=opus",
+                "audio/webm;codecs=opus",
+                "audio/webm",
+            ];
+
+            const supportedMime = preferredMimeTypes.find((mime) => MediaRecorder.isTypeSupported(mime));
+            const recorder = supportedMime
+                ? new MediaRecorder(stream, { mimeType: supportedMime })
+                : new MediaRecorder(stream);
+
+            mediaRecorderRef.current = recorder;
+            const chunks: BlobPart[] = [];
+
+            recorder.ondataavailable = (evt) => {
+                if (evt.data.size > 0) chunks.push(evt.data);
+            };
+
+            recorder.onstop = async () => {
+                setRecordingAudio(false);
+                mediaRecorderRef.current = null;
+
+                stream.getTracks().forEach((track) => track.stop());
+                mediaStreamRef.current = null;
+
+                const finalType = recorder.mimeType || "audio/webm";
+                const blob = new Blob(chunks, { type: finalType });
+                const extension = finalType.includes("ogg") ? "ogg" : "webm";
+                const file = new File([blob], `audio-${Date.now()}.${extension}`, { type: finalType });
+
+                await sendMediaFile("audio", file);
+            };
+
+            recorder.start();
+            setRecordingAudio(true);
+        } catch (err) {
+            setRecordingAudio(false);
+            mediaRecorderRef.current = null;
+            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+            mediaStreamRef.current = null;
+            setActionError(
+                err instanceof Error && err.message
+                    ? err.message
+                    : "No se pudo iniciar la grabación de audio"
+            );
+        }
+    }, [inputBloqueado, sendingMessage, recordingAudio, sendMediaFile]);
 
     useEffect(() => {
         fetchConversaciones();
@@ -368,7 +489,20 @@ export default function ConversacionesPage() {
     useEffect(() => {
         setActionError(null);
         setClosingChat(false);
+        setSelectedImageFile(null);
+        setSelectedImagePreviewUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+        });
     }, [seleccionada]);
+
+    useEffect(() => {
+        return () => {
+            mediaRecorderRef.current?.stop();
+            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+            if (selectedImagePreviewUrl) URL.revokeObjectURL(selectedImagePreviewUrl);
+        };
+    }, [selectedImagePreviewUrl]);
 
     const conversacionesFiltradas = useMemo(() => {
         const term = busqueda.trim().toLowerCase();
@@ -613,6 +747,10 @@ export default function ConversacionesPage() {
                                             key={mensaje.messageId}
                                             className={`flex ${mensaje.direction === "outbound" ? "justify-end" : "justify-start"}`}
                                         >
+                                            {(() => {
+                                                const previewUrl = imagePreviewByMessageId[mensaje.messageId];
+                                                const isImage = mensaje.mediaType === "image" || Boolean(previewUrl);
+                                                return (
                                             <div
                                                 className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
                                                     mensaje.direction === "outbound"
@@ -642,7 +780,18 @@ export default function ConversacionesPage() {
                                                         </span>
                                                     )}
                                                 </div>
-                                                <p>{mensaje.body || "Mensaje sin texto"}</p>
+                                                {isImage && previewUrl ? (
+                                                    <div className="space-y-2">
+                                                        <img
+                                                            src={previewUrl}
+                                                            alt={mensaje.body || "Imagen enviada"}
+                                                            className="max-h-64 w-auto rounded-xl border border-white/20"
+                                                        />
+                                                        {mensaje.body ? <p>{mensaje.body}</p> : null}
+                                                    </div>
+                                                ) : (
+                                                    <p>{mensaje.body || "Mensaje sin texto"}</p>
+                                                )}
                                                 <p
                                                     className={`mt-1 text-[10px] ${
                                                         mensaje.direction === "outbound" ? "text-white/70" : "text-surface-400"
@@ -651,6 +800,8 @@ export default function ConversacionesPage() {
                                                     {formatHour(mensaje.timestamp)} · {mensaje.source.toUpperCase()}
                                                 </p>
                                             </div>
+                                                );
+                                            })()}
                                         </div>
                                     ))}
 
@@ -662,7 +813,38 @@ export default function ConversacionesPage() {
                                 </div>
 
                                 <div className="border-t border-surface-800/20 bg-white/70 p-4">
+                                    {selectedImagePreviewUrl && (
+                                        <div className="mb-3 rounded-xl border border-surface-800/20 bg-white p-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="space-y-2">
+                                                    <p className="text-xs font-semibold text-surface-500">Vista previa</p>
+                                                    <img
+                                                        src={selectedImagePreviewUrl}
+                                                        alt={selectedImageFile?.name || "Imagen seleccionada"}
+                                                        className="max-h-44 w-auto rounded-lg border border-surface-800/20"
+                                                    />
+                                                    <p className="text-[11px] text-surface-400 truncate max-w-[280px]">
+                                                        {selectedImageFile?.name || "imagen"}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={handleLimpiarAdjuntoImagen}
+                                                    className="px-2 py-1 rounded-md border border-surface-800/30 text-[11px] text-surface-500 hover:text-primary-500"
+                                                    disabled={sendingMessage}
+                                                >
+                                                    Quitar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="flex gap-3">
+                                        <input
+                                            ref={imageInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={handleImagenSeleccionada}
+                                        />
                                         <input
                                             value={draftMessage}
                                             onChange={(e) => setDraftMessage(e.target.value)}
@@ -679,25 +861,29 @@ export default function ConversacionesPage() {
                                             disabled={inputBloqueado}
                                         />
                                         <button
-                                            onClick={() => handleEnviarMedia("image")}
+                                            onClick={handleSeleccionarImagen}
                                             className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                             disabled={inputBloqueado || sendingMessage}
-                                            title="Enviar imagen por URL"
+                                            title="Seleccionar imagen"
                                         >
                                             Imagen
                                         </button>
                                         <button
-                                            onClick={() => handleEnviarMedia("audio")}
+                                            onClick={handleAudioDesdeMicrofono}
                                             className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                             disabled={inputBloqueado || sendingMessage}
-                                            title="Enviar audio por URL"
+                                            title={recordingAudio ? "Detener y enviar audio" : "Grabar audio"}
                                         >
-                                            Audio
+                                            {recordingAudio ? "Detener" : "Audio"}
                                         </button>
                                         <button
                                             onClick={handleEnviarMensaje}
                                             className="btn-primary whitespace-nowrap"
-                                            disabled={inputBloqueado || sendingMessage || !draftMessage.trim()}
+                                            disabled={
+                                                inputBloqueado ||
+                                                sendingMessage ||
+                                                (!draftMessage.trim() && !selectedImageFile)
+                                            }
                                         >
                                             {sendingMessage ? "Enviando..." : "Enviar"}
                                         </button>
