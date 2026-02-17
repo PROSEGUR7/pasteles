@@ -160,6 +160,36 @@ async function insertMessage(params: {
     );
 }
 
+async function mirrorToN8nHistory(params: {
+    waId: string;
+    messageId: string;
+    direction: "inbound" | "outbound";
+    body: string | null;
+    timestamp: Date;
+    raw: MetaWebhookMessage;
+}) {
+    const { waId, messageId, direction, body, timestamp, raw } = params;
+    try {
+        await pool.query(
+            `INSERT INTO n8n_chat_histories (session_id, message, created_at)
+             VALUES ($1, $2, $3);`,
+            [
+                waId,
+                JSON.stringify({
+                    id: messageId,
+                    direction,
+                    text: body,
+                    timestamp: timestamp.toISOString(),
+                    raw,
+                }),
+                timestamp.toISOString(),
+            ]
+        );
+    } catch (error) {
+        console.error("[Meta Store] No se pudo espejar en n8n_chat_histories:", error);
+    }
+}
+
 export async function persistMetaWebhookPayload(payload: unknown) {
     await ensureMetaTables();
     const data = payload as MetaWebhookPayload;
@@ -203,6 +233,15 @@ export async function persistMetaWebhookPayload(payload: unknown) {
             });
 
             await insertMessage({
+                waId,
+                messageId: message.id,
+                direction,
+                body,
+                timestamp,
+                raw: message,
+            });
+
+            await mirrorToN8nHistory({
                 waId,
                 messageId: message.id,
                 direction,
