@@ -15,20 +15,76 @@ function isDbConnectivityError(error: unknown): boolean {
 
 export async function GET() {
     try {
-        const result = await pool.query(
-            `SELECT
-                c.id_cliente,
-                c.nombre,
-                c.telefono,
-                COUNT(p.id_pedido) AS total_pedidos,
-                COALESCE(SUM(CASE WHEN p.estado = 'cancelado' THEN 1 ELSE 0 END), 0) AS pedidos_cancelados,
-                MAX(p.fecha) AS ultimo_pedido
-             FROM clientes c
-             LEFT JOIN pedidos p ON p.id_cliente = c.id_cliente
-             GROUP BY c.id_cliente, c.nombre, c.telefono
-             ORDER BY MAX(p.fecha) DESC NULLS LAST, c.nombre ASC
-             LIMIT 50;`
-        );
+        let result;
+        try {
+            result = await pool.query(
+                `WITH base AS (
+                    SELECT
+                        c.id_cliente,
+                        c.nombre,
+                        c.telefono,
+                        REGEXP_REPLACE(COALESCE(c.telefono, ''), '\\D', '', 'g') AS telefono_digits,
+                        COUNT(p.id_pedido) AS total_pedidos,
+                        COALESCE(SUM(CASE WHEN p.estado = 'cancelado' THEN 1 ELSE 0 END), 0) AS pedidos_cancelados,
+                        MAX(p.fecha) AS ultimo_pedido
+                    FROM clientes c
+                    LEFT JOIN pedidos p ON p.id_cliente = c.id_cliente
+                    GROUP BY c.id_cliente, c.nombre, c.telefono
+                )
+                SELECT
+                    b.id_cliente,
+                    b.nombre,
+                    b.telefono,
+                    b.total_pedidos,
+                    b.pedidos_cancelados,
+                    b.ultimo_pedido,
+                    conv.bot_status
+                FROM base b
+                LEFT JOIN LATERAL (
+                    SELECT mc.bot_status
+                    FROM meta_conversations mc
+                    WHERE b.telefono_digits <> ''
+                      AND REGEXP_REPLACE(COALESCE(mc.wa_id, ''), '\\D', '', 'g') <> ''
+                      AND (
+                        REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g') = b.telefono_digits
+                        OR RIGHT(REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g'), 10) = RIGHT(b.telefono_digits, 10)
+                        OR REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g') LIKE '%' || b.telefono_digits
+                      )
+                    ORDER BY
+                        CASE
+                            WHEN REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g') = b.telefono_digits THEN 3
+                            WHEN RIGHT(REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g'), 10) = RIGHT(b.telefono_digits, 10) THEN 2
+                            WHEN REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g') LIKE '%' || b.telefono_digits THEN 1
+                            ELSE 0
+                        END DESC,
+                        LENGTH(REGEXP_REPLACE(mc.wa_id, '\\D', '', 'g')) ASC
+                    LIMIT 1
+                ) conv ON TRUE
+                ORDER BY b.ultimo_pedido DESC NULLS LAST, b.nombre ASC
+                LIMIT 50;`
+            );
+        } catch (error) {
+            const candidate = error as { code?: string; message?: string } | undefined;
+            if (candidate?.code === "42P01" || /meta_conversations/i.test(candidate?.message || "")) {
+                result = await pool.query(
+                    `SELECT
+                        c.id_cliente,
+                        c.nombre,
+                        c.telefono,
+                        COUNT(p.id_pedido) AS total_pedidos,
+                        COALESCE(SUM(CASE WHEN p.estado = 'cancelado' THEN 1 ELSE 0 END), 0) AS pedidos_cancelados,
+                        MAX(p.fecha) AS ultimo_pedido,
+                        NULL::TEXT AS bot_status
+                    FROM clientes c
+                    LEFT JOIN pedidos p ON p.id_cliente = c.id_cliente
+                    GROUP BY c.id_cliente, c.nombre, c.telefono
+                    ORDER BY MAX(p.fecha) DESC NULLS LAST, c.nombre ASC
+                    LIMIT 50;`
+                );
+            } else {
+                throw error;
+            }
+        }
 
         const clientes = result.rows.map((row) => ({
             id: Number(row.id_cliente),
@@ -37,6 +93,10 @@ export async function GET() {
             totalPedidos: Number(row.total_pedidos || 0),
             pedidosCancelados: Number(row.pedidos_cancelados || 0),
             ultimoPedido: row.ultimo_pedido ? new Date(row.ultimo_pedido).toISOString() : null,
+            botStatus:
+                row.bot_status === "activo" || row.bot_status === "inactivo"
+                    ? (row.bot_status as "activo" | "inactivo")
+                    : null,
         }));
 
         return NextResponse.json({ clientes });

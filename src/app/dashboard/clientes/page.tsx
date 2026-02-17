@@ -10,6 +10,7 @@ interface ClienteResumen {
     totalPedidos: number;
     pedidosCancelados: number;
     ultimoPedido: string | null;
+    botStatus?: "activo" | "inactivo" | null;
 }
 
 type PedidoResumen = {
@@ -469,6 +470,7 @@ export default function ClientesPage() {
                                     <th className="text-left font-medium px-5 py-3">Pedidos</th>
                                     <th className="text-left font-medium px-5 py-3">Último pedido</th>
                                     <th className="text-right font-medium px-5 py-3">Estado</th>
+                                    <th className="text-right font-medium px-5 py-3">Atención</th>
                                     <th className="text-right font-medium px-5 py-3">Acciones</th>
                                 </tr>
                             </thead>
@@ -490,6 +492,23 @@ export default function ClientesPage() {
                                                 {cliente.pedidosCancelados > 0
                                                     ? `${cliente.pedidosCancelados} cancelados`
                                                     : "Sin cancelaciones"}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3 text-right">
+                                            <span
+                                                className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${
+                                                    cliente.botStatus === "inactivo"
+                                                        ? "bg-blue-500/15 text-blue-700"
+                                                        : cliente.botStatus === "activo"
+                                                            ? "bg-emerald-500/15 text-emerald-700"
+                                                            : "bg-surface-900/10 text-surface-500"
+                                                }`}
+                                            >
+                                                {cliente.botStatus === "inactivo"
+                                                    ? "Humano"
+                                                    : cliente.botStatus === "activo"
+                                                        ? "IA"
+                                                        : "—"}
                                             </span>
                                         </td>
                                         <td className="px-5 py-3 text-right">
