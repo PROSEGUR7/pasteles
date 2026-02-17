@@ -18,6 +18,9 @@ interface ConversationMessage {
     direction: "inbound" | "outbound";
     body: string | null;
     timestamp: string;
+    senderType: "ia" | "humano" | "cliente" | "sistema";
+    interventionStatus: "activo" | "inactivo" | null;
+    source: "meta" | "n8n";
 }
 
 const FILTROS: FiltroCanal[] = ["Todos", "WhatsApp", "Instagram", "Web"];
@@ -41,6 +44,20 @@ function formatHour(dateInput?: string | null) {
     const date = new Date(dateInput);
     if (Number.isNaN(date.getTime())) return "";
     return date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+}
+
+function getSenderLabel(senderType: ConversationMessage["senderType"]) {
+    if (senderType === "ia") return "IA";
+    if (senderType === "humano") return "Humano";
+    if (senderType === "cliente") return "Cliente";
+    return "Sistema";
+}
+
+function getSenderBadgeClass(senderType: ConversationMessage["senderType"]) {
+    if (senderType === "ia") return "bg-emerald-500/15 text-emerald-700";
+    if (senderType === "humano") return "bg-blue-500/15 text-blue-700";
+    if (senderType === "cliente") return "bg-surface-900/10 text-surface-500";
+    return "bg-violet-500/15 text-violet-700";
 }
 
 export default function ConversacionesPage() {
@@ -127,9 +144,16 @@ export default function ConversacionesPage() {
     }, [busqueda, conversaciones]);
 
     const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
+    const ultimoEstadoIntervencion = useMemo(() => {
+        for (let index = mensajes.length - 1; index >= 0; index--) {
+            const estado = mensajes[index].interventionStatus;
+            if (estado) return estado;
+        }
+        return "inactivo";
+    }, [mensajes]);
 
     return (
-        <div className="space-y-6">
+        <div className="h-full flex flex-col gap-4 overflow-hidden min-h-0">
             <div className="animate-in">
                 <h1 className="text-3xl font-bold text-surface-50">Conversaciones</h1>
                 <p className="text-surface-400 text-sm mt-1">
@@ -137,9 +161,9 @@ export default function ConversacionesPage() {
                 </p>
             </div>
 
-            <div className="glass-card overflow-hidden animate-in" style={{ animationDelay: "100ms" }}>
-                <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-[70vh]">
-                    <aside className="border-r border-surface-800/30 bg-white/50">
+            <div className="glass-card overflow-hidden animate-in flex-1 min-h-0" style={{ animationDelay: "100ms" }}>
+                <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
+                    <aside className="border-r border-surface-800/30 bg-white/50 flex flex-col min-h-0">
                         <div className="p-4 border-b border-surface-800/20 space-y-4">
                             <div className="flex items-center justify-between">
                                 <div>
@@ -195,7 +219,7 @@ export default function ConversacionesPage() {
                             </div>
                         )}
 
-                        <div className="divide-y divide-surface-800/15 max-h-[62vh] overflow-y-auto">
+                        <div className="divide-y divide-surface-800/15 flex-1 overflow-y-auto min-h-0">
                             {conversacionesFiltradas.map((conversacion) => {
                                 const activo = seleccionada === conversacion.waId;
                                 return (
@@ -252,7 +276,7 @@ export default function ConversacionesPage() {
                         </div>
                     </aside>
 
-                    <section className="relative bg-white/30 flex flex-col">
+                    <section className="relative bg-white/30 flex flex-col min-h-0 overflow-hidden">
                         {conversacionActiva ? (
                             <>
                                 <div className="px-6 py-4 border-b border-surface-800/20 bg-white/70 flex flex-wrap items-center justify-between gap-4">
@@ -265,6 +289,15 @@ export default function ConversacionesPage() {
                                             </span>
                                             <span className="px-2 py-0.5 rounded-full bg-surface-900 text-surface-200">
                                                 {conversacionActiva.canal}
+                                            </span>
+                                            <span
+                                                className={`px-2 py-0.5 rounded-full ${
+                                                    ultimoEstadoIntervencion === "activo"
+                                                        ? "bg-emerald-500/15 text-emerald-700"
+                                                        : "bg-surface-900/10 text-surface-500"
+                                                }`}
+                                            >
+                                                Intervención {ultimoEstadoIntervencion === "activo" ? "activa" : "inactiva"}
                                             </span>
                                         </div>
                                     </div>
@@ -279,7 +312,7 @@ export default function ConversacionesPage() {
                                     </div>
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20">
+                                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20 min-h-0">
                                     {loadingMensajes && (
                                         <div className="text-center text-xs text-surface-400">Cargando mensajes...</div>
                                     )}
@@ -295,13 +328,35 @@ export default function ConversacionesPage() {
                                                         : "bg-white border border-surface-800/15 text-surface-100"
                                                 }`}
                                             >
+                                                <div className="mb-1.5 flex items-center gap-2">
+                                                    <span
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                            mensaje.direction === "outbound"
+                                                                ? "bg-white/20 text-white"
+                                                                : getSenderBadgeClass(mensaje.senderType)
+                                                        }`}
+                                                    >
+                                                        {getSenderLabel(mensaje.senderType)}
+                                                    </span>
+                                                    {mensaje.interventionStatus && (
+                                                        <span
+                                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                                mensaje.interventionStatus === "activo"
+                                                                    ? "bg-emerald-500/15 text-emerald-700"
+                                                                    : "bg-surface-900/10 text-surface-500"
+                                                            }`}
+                                                        >
+                                                            {mensaje.interventionStatus === "activo" ? "Activo" : "Inactivo"}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <p>{mensaje.body || "Mensaje sin texto"}</p>
                                                 <p
                                                     className={`mt-1 text-[10px] ${
                                                         mensaje.direction === "outbound" ? "text-white/70" : "text-surface-400"
                                                     }`}
                                                 >
-                                                    {formatHour(mensaje.timestamp)}
+                                                    {formatHour(mensaje.timestamp)} · {mensaje.source.toUpperCase()}
                                                 </p>
                                             </div>
                                         </div>

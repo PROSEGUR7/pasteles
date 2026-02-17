@@ -16,6 +16,9 @@ export interface ConversationMessage {
     direction: "inbound" | "outbound";
     body: string | null;
     timestamp: string;
+    senderType: "ia" | "humano" | "cliente" | "sistema";
+    interventionStatus: "activo" | "inactivo" | null;
+    source: "meta" | "n8n";
 }
 
 type MetaWebhookPayload = {
@@ -160,36 +163,6 @@ async function insertMessage(params: {
     );
 }
 
-async function mirrorToN8nHistory(params: {
-    waId: string;
-    messageId: string;
-    direction: "inbound" | "outbound";
-    body: string | null;
-    timestamp: Date;
-    raw: MetaWebhookMessage;
-}) {
-    const { waId, messageId, direction, body, timestamp, raw } = params;
-    try {
-        await pool.query(
-            `INSERT INTO n8n_chat_histories (session_id, message, created_at)
-             VALUES ($1, $2, $3);`,
-            [
-                waId,
-                JSON.stringify({
-                    id: messageId,
-                    direction,
-                    text: body,
-                    timestamp: timestamp.toISOString(),
-                    raw,
-                }),
-                timestamp.toISOString(),
-            ]
-        );
-    } catch (error) {
-        console.error("[Meta Store] No se pudo espejar en n8n_chat_histories:", error);
-    }
-}
-
 export async function persistMetaWebhookPayload(payload: unknown) {
     await ensureMetaTables();
     const data = payload as MetaWebhookPayload;
@@ -240,15 +213,6 @@ export async function persistMetaWebhookPayload(payload: unknown) {
                 timestamp,
                 raw: message,
             });
-
-            await mirrorToN8nHistory({
-                waId,
-                messageId: message.id,
-                direction,
-                body,
-                timestamp,
-                raw: message,
-            });
         }
     }
 }
@@ -291,8 +255,8 @@ export async function listMetaConversations(canal?: string): Promise<Conversatio
 
 export async function getMetaConversationMessages(waId: string): Promise<ConversationMessage[]> {
     await ensureMetaTables();
-    const result = await pool.query(
-        `SELECT message_id, direction, body, timestamp
+    const metaResult = await pool.query(
+        `SELECT message_id, direction, body, timestamp, raw
          FROM meta_messages
          WHERE wa_id = $1
          ORDER BY timestamp ASC
@@ -300,12 +264,69 @@ export async function getMetaConversationMessages(waId: string): Promise<Convers
         [waId]
     );
 
-    return result.rows.map((row) => ({
-        messageId: row.message_id,
-        direction: row.direction,
-        body: row.body,
-        timestamp: row.timestamp,
-    }));
+    const inferSenderType = (
+        raw: Record<string, unknown> | null | undefined,
+        direction: "inbound" | "outbound"
+    ): "ia" | "humano" | "cliente" | "sistema" => {
+        const candidate = [
+            raw?.senderType,
+            raw?.sender_type,
+            raw?.actor,
+            raw?.sender,
+            raw?.role,
+            raw?.source,
+            raw?.intervenedBy,
+        ]
+            .find((value) => typeof value === "string")
+            ?.toString()
+            .toLowerCase();
+
+        if (candidate) {
+            if (/(ia|ai|bot|assistant)/.test(candidate)) return "ia";
+            if (/(humano|human|agent|asesor|admin)/.test(candidate)) return "humano";
+            if (/(cliente|client|user|contacto)/.test(candidate)) return "cliente";
+            if (/(system|sistema)/.test(candidate)) return "sistema";
+        }
+
+        if (direction === "inbound") return "cliente";
+        return "ia";
+    };
+
+    const inferInterventionStatus = (
+        raw: Record<string, unknown> | null | undefined
+    ): "activo" | "inactivo" | null => {
+        const candidate = [
+            raw?.interventionStatus,
+            raw?.intervention_status,
+            raw?.agentStatus,
+            raw?.agent_status,
+            raw?.status,
+            raw?.estado,
+            raw?.mode,
+        ]
+            .find((value) => typeof value === "string")
+            ?.toString()
+            .toLowerCase();
+
+        if (!candidate) return null;
+        if (/(activo|active|on|enabled)/.test(candidate)) return "activo";
+        if (/(inactivo|inactive|off|disabled|paused)/.test(candidate)) return "inactivo";
+        return null;
+    };
+
+    return metaResult.rows.map((row) => {
+        const raw = (row.raw || {}) as Record<string, unknown>;
+        const direction = row.direction as "inbound" | "outbound";
+        return {
+            messageId: row.message_id,
+            direction,
+            body: row.body,
+            timestamp: row.timestamp,
+            senderType: inferSenderType(raw, direction),
+            interventionStatus: inferInterventionStatus(raw),
+            source: "meta",
+        };
+    });
 }
 
 export async function markConversationRead(waId: string) {

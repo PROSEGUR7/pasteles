@@ -71,6 +71,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const router = useRouter();
     const pathname = usePathname();
+    const isConversationsRoute = pathname === "/dashboard/conversaciones";
 
     useEffect(() => {
         const token = localStorage.getItem("token");
@@ -164,7 +165,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </aside>
 
             {/* Main Content */}
-            <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-20"}`}>
+            <main
+                className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-20"} ${
+                    isConversationsRoute ? "h-screen overflow-hidden" : ""
+                }`}
+            >
                 {/* Top Bar */}
                 <header className="sticky top-0 z-30 h-16 flex items-center justify-between px-6 border-b border-surface-800/50" style={{ background: "rgba(255,250,245,0.85)", backdropFilter: "blur(12px)" }}>
                     <button
@@ -189,7 +194,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </header>
 
                 {/* Page Content */}
-                <div className="p-6">
+                <div className={isConversationsRoute ? "p-6 h-[calc(100vh-64px)] overflow-hidden" : "p-6"}>
                     {children}
                 </div>
             </main>
