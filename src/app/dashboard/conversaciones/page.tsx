@@ -75,7 +75,6 @@ export default function ConversacionesPage() {
     const [actionError, setActionError] = useState<string | null>(null);
     const [updatingBot, setUpdatingBot] = useState(false);
     const [draftMessage, setDraftMessage] = useState("");
-    const [allowAutoSelect, setAllowAutoSelect] = useState(true);
 
     const fetchConversaciones = useCallback(
         async (silent = false) => {
@@ -119,7 +118,6 @@ export default function ConversacionesPage() {
 
     const handleSeleccion = useCallback(
         (waId: string) => {
-            setAllowAutoSelect(true);
             setSeleccionada(waId);
             fetchMensajes(waId);
         },
@@ -147,10 +145,18 @@ export default function ConversacionesPage() {
                 }
                 throw new Error(backendMessage);
             }
-            await fetchConversaciones();
+
+            setConversaciones((prev) =>
+                prev.map((conversation) =>
+                    conversation.waId === seleccionada
+                        ? { ...conversation, estado: "cerrado" }
+                        : conversation
+                )
+            );
             setMensajes([]);
             setSeleccionada(null);
-            setAllowAutoSelect(false);
+            setDraftMessage("");
+            fetchConversaciones(true);
         } catch (err) {
             console.error("[Conversaciones] Cerrar chat", err);
             setActionError(
@@ -222,9 +228,9 @@ export default function ConversacionesPage() {
             return;
         }
         if (seleccionada && conversaciones.some((c) => c.waId === seleccionada)) return;
-        if (!allowAutoSelect) return;
-        handleSeleccion(conversaciones[0].waId);
-    }, [conversaciones, seleccionada, handleSeleccion, allowAutoSelect]);
+        setSeleccionada(null);
+        setMensajes([]);
+    }, [conversaciones, seleccionada]);
 
     useEffect(() => {
         setActionError(null);
@@ -436,11 +442,11 @@ export default function ConversacionesPage() {
                                             <button
                                                 type="button"
                                                 onClick={handleToggleBot}
-                                                disabled={updatingBot || conversacionActiva.estado === "cerrado"}
+                                                disabled={updatingBot}
                                                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                                                     botActivo ? "bg-emerald-500" : "bg-surface-700"
                                                 } ${
-                                                    updatingBot || conversacionActiva.estado === "cerrado"
+                                                    updatingBot
                                                         ? "opacity-60 cursor-not-allowed"
                                                         : "cursor-pointer"
                                                 }`}
