@@ -9,6 +9,8 @@ export interface ConversationSummary {
     lastMessage: string | null;
     lastMessageAt: string | null;
     unreadCount: number;
+    estado: "abierto" | "cerrado";
+    botStatus: "activo" | "inactivo";
 }
 
 export interface ConversationMessage {
@@ -85,8 +87,23 @@ async function ensureMetaTables() {
             canal TEXT NOT NULL DEFAULT 'WhatsApp',
             last_message TEXT,
             last_message_at TIMESTAMPTZ DEFAULT NOW(),
-            created_at TIMESTAMPTZ DEFAULT NOW()
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            estado TEXT NOT NULL DEFAULT 'abierto',
+            closed_at TIMESTAMPTZ,
+            bot_status TEXT NOT NULL DEFAULT 'activo'
         );
+    `);
+    await pool.query(`
+        ALTER TABLE meta_conversations
+        ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'abierto';
+    `);
+    await pool.query(`
+        ALTER TABLE meta_conversations
+        ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+    `);
+    await pool.query(`
+        ALTER TABLE meta_conversations
+        ADD COLUMN IF NOT EXISTS bot_status TEXT NOT NULL DEFAULT 'activo';
     `);
     await pool.query(`
         CREATE TABLE IF NOT EXISTS meta_messages (
@@ -135,13 +152,15 @@ async function upsertConversation(params: {
 }) {
     const { waId, nombre, canal, lastMessage, lastMessageAt } = params;
     await pool.query(
-        `INSERT INTO meta_conversations (wa_id, nombre, canal, last_message, last_message_at)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO meta_conversations (wa_id, nombre, canal, last_message, last_message_at, estado, closed_at, bot_status)
+         VALUES ($1, $2, $3, $4, $5, 'abierto', NULL, 'activo')
          ON CONFLICT (wa_id)
          DO UPDATE SET nombre = EXCLUDED.nombre,
                        canal = EXCLUDED.canal,
                        last_message = EXCLUDED.last_message,
-                       last_message_at = EXCLUDED.last_message_at;`,
+                       last_message_at = EXCLUDED.last_message_at,
+                       estado = 'abierto',
+                       closed_at = NULL;`,
         [waId, nombre, canal, lastMessage, lastMessageAt.toISOString()]
     );
 }
@@ -220,11 +239,12 @@ export async function persistMetaWebhookPayload(payload: unknown) {
 export async function listMetaConversations(canal?: string): Promise<ConversationSummary[]> {
     await ensureMetaTables();
     const params: string[] = [];
-    let whereClause = "";
+    const conditions: string[] = [];
     if (canal) {
         params.push(canal);
-        whereClause = `WHERE c.canal = $${params.length}`;
+        conditions.push(`c.canal = $${params.length}`);
     }
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const result = await pool.query(
         `WITH unread AS (
@@ -233,7 +253,7 @@ export async function listMetaConversations(canal?: string): Promise<Conversatio
             WHERE direction = 'inbound' AND read_at IS NULL
             GROUP BY wa_id
         )
-        SELECT c.wa_id, c.nombre, c.canal, c.last_message, c.last_message_at,
+         SELECT c.wa_id, c.nombre, c.canal, c.last_message, c.last_message_at, c.estado, c.bot_status,
                COALESCE(u.unread_count, 0) AS unread_count
         FROM meta_conversations c
         LEFT JOIN unread u ON u.wa_id = c.wa_id
@@ -250,6 +270,8 @@ export async function listMetaConversations(canal?: string): Promise<Conversatio
         lastMessage: row.last_message,
         lastMessageAt: row.last_message_at,
         unreadCount: Number(row.unread_count || 0),
+        estado: (row.estado as "abierto" | "cerrado") || "abierto",
+        botStatus: (row.bot_status as "activo" | "inactivo") || "activo",
     }));
 }
 
@@ -336,5 +358,28 @@ export async function markConversationRead(waId: string) {
          SET read_at = NOW()
          WHERE wa_id = $1 AND direction = 'inbound' AND read_at IS NULL;`,
         [waId]
+    );
+}
+
+export async function closeMetaConversation(waId: string) {
+    await ensureMetaTables();
+    await pool.query(
+        `UPDATE meta_conversations
+         SET estado = 'cerrado', closed_at = NOW()
+         WHERE wa_id = $1;`,
+        [waId]
+    );
+}
+
+export async function setMetaConversationBotStatus(
+    waId: string,
+    botStatus: "activo" | "inactivo"
+) {
+    await ensureMetaTables();
+    await pool.query(
+        `UPDATE meta_conversations
+         SET bot_status = $2
+         WHERE wa_id = $1;`,
+        [waId, botStatus]
     );
 }

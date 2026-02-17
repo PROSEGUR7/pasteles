@@ -11,6 +11,8 @@ interface ConversationSummary {
     lastMessage: string | null;
     lastMessageAt: string | null;
     unreadCount: number;
+    estado: "abierto" | "cerrado";
+    botStatus: "activo" | "inactivo";
 }
 
 interface ConversationMessage {
@@ -69,6 +71,11 @@ export default function ConversacionesPage() {
     const [loadingConvs, setLoadingConvs] = useState(true);
     const [loadingMensajes, setLoadingMensajes] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [closingChat, setClosingChat] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const [updatingBot, setUpdatingBot] = useState(false);
+    const [draftMessage, setDraftMessage] = useState("");
+    const [allowAutoSelect, setAllowAutoSelect] = useState(true);
 
     const fetchConversaciones = useCallback(
         async (silent = false) => {
@@ -94,11 +101,12 @@ export default function ConversacionesPage() {
         async (waId: string) => {
             try {
                 setLoadingMensajes(true);
-                const res = await fetch(`/api/conversaciones/${waId}`, { cache: "no-store" });
+                const encodedWaId = encodeURIComponent(waId);
+                const res = await fetch(`/api/conversaciones/${encodedWaId}`, { cache: "no-store" });
                 if (!res.ok) throw new Error("Error cargando mensajes");
                 const data = await res.json();
                 setMensajes(data.messages || []);
-                await fetch(`/api/conversaciones/${waId}`, { method: "PATCH" });
+                await fetch(`/api/conversaciones/${encodedWaId}`, { method: "PATCH" });
                 fetchConversaciones(true);
             } catch (err) {
                 console.error("[Conversaciones] Mensajes error", err);
@@ -111,11 +119,95 @@ export default function ConversacionesPage() {
 
     const handleSeleccion = useCallback(
         (waId: string) => {
+            setAllowAutoSelect(true);
             setSeleccionada(waId);
             fetchMensajes(waId);
         },
         [fetchMensajes]
     );
+
+    const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
+    const botActivo = conversacionActiva?.botStatus === "activo";
+    const inputBloqueado = !conversacionActiva || conversacionActiva.estado === "cerrado" || botActivo;
+
+    const handleCerrarChat = useCallback(async () => {
+        if (!seleccionada || closingChat) return;
+        try {
+            setActionError(null);
+            setClosingChat(true);
+            const encodedWaId = encodeURIComponent(seleccionada);
+            const res = await fetch(`/api/conversaciones/${encodedWaId}`, { method: "DELETE" });
+            if (!res.ok) {
+                let backendMessage = "Error cerrando la conversación";
+                try {
+                    const data = await res.json();
+                    if (typeof data?.error === "string") backendMessage = data.error;
+                } catch {
+                    // noop
+                }
+                throw new Error(backendMessage);
+            }
+            await fetchConversaciones();
+            setMensajes([]);
+            setSeleccionada(null);
+            setAllowAutoSelect(false);
+        } catch (err) {
+            console.error("[Conversaciones] Cerrar chat", err);
+            setActionError(
+                err instanceof Error && err.message
+                    ? err.message
+                    : "No pudimos cerrar el chat. Intenta nuevamente."
+            );
+        } finally {
+            setClosingChat(false);
+        }
+    }, [seleccionada, closingChat, fetchConversaciones]);
+
+    const handleToggleBot = useCallback(async () => {
+        if (!conversacionActiva || updatingBot) return;
+        try {
+            setActionError(null);
+            setUpdatingBot(true);
+            const encodedWaId = encodeURIComponent(conversacionActiva.waId);
+            const nextStatus = conversacionActiva.botStatus === "activo" ? "inactivo" : "activo";
+            const res = await fetch(`/api/conversaciones/${encodedWaId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ botStatus: nextStatus }),
+            });
+
+            if (!res.ok) {
+                let backendMessage = "No se pudo actualizar el estado del bot";
+                try {
+                    const data = await res.json();
+                    if (typeof data?.error === "string") backendMessage = data.error;
+                } catch {
+                    // noop
+                }
+                throw new Error(backendMessage);
+            }
+
+            setConversaciones((prev) =>
+                prev.map((c) =>
+                    c.waId === conversacionActiva.waId
+                        ? {
+                            ...c,
+                            botStatus: nextStatus,
+                        }
+                        : c
+                )
+            );
+        } catch (err) {
+            console.error("[Conversaciones] Toggle bot", err);
+            setActionError(
+                err instanceof Error && err.message
+                    ? err.message
+                    : "No pudimos actualizar el estado del bot."
+            );
+        } finally {
+            setUpdatingBot(false);
+        }
+    }, [conversacionActiva, updatingBot]);
 
     useEffect(() => {
         fetchConversaciones();
@@ -130,8 +222,14 @@ export default function ConversacionesPage() {
             return;
         }
         if (seleccionada && conversaciones.some((c) => c.waId === seleccionada)) return;
+        if (!allowAutoSelect) return;
         handleSeleccion(conversaciones[0].waId);
-    }, [conversaciones, seleccionada, handleSeleccion]);
+    }, [conversaciones, seleccionada, handleSeleccion, allowAutoSelect]);
+
+    useEffect(() => {
+        setActionError(null);
+        setClosingChat(false);
+    }, [seleccionada]);
 
     const conversacionesFiltradas = useMemo(() => {
         const term = busqueda.trim().toLowerCase();
@@ -143,17 +241,8 @@ export default function ConversacionesPage() {
         );
     }, [busqueda, conversaciones]);
 
-    const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
-    const ultimoEstadoIntervencion = useMemo(() => {
-        for (let index = mensajes.length - 1; index >= 0; index--) {
-            const estado = mensajes[index].interventionStatus;
-            if (estado) return estado;
-        }
-        return "inactivo";
-    }, [mensajes]);
-
     return (
-        <div className="h-full flex flex-col gap-4 overflow-hidden min-h-0">
+        <div className="h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden min-h-0 pr-1">
             <div className="animate-in">
                 <h1 className="text-3xl font-bold text-surface-50">Conversaciones</h1>
                 <p className="text-surface-400 text-sm mt-1">
@@ -162,7 +251,7 @@ export default function ConversacionesPage() {
             </div>
 
             <div className="glass-card overflow-hidden animate-in flex-1 min-h-0" style={{ animationDelay: "100ms" }}>
-                <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
+                    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] h-full">
                     <aside className="border-r border-surface-800/30 bg-white/50 flex flex-col min-h-0">
                         <div className="p-4 border-b border-surface-800/20 space-y-4">
                             <div className="flex items-center justify-between">
@@ -253,9 +342,20 @@ export default function ConversacionesPage() {
                                                 </p>
                                                 <div className="mt-2 flex items-center gap-2 text-[10px] text-surface-500">
                                                     <span className="inline-flex items-center gap-1">
-                                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                        <span
+                                                            className={`h-2 w-2 rounded-full ${
+                                                                conversacion.estado === "cerrado"
+                                                                    ? "bg-surface-400"
+                                                                    : "bg-emerald-500"
+                                                            }`}
+                                                        />
                                                         {conversacion.canal}
                                                     </span>
+                                                    {conversacion.estado === "cerrado" && (
+                                                        <span className="px-2 py-0.5 rounded-full bg-surface-900/10 text-surface-500">
+                                                            Cerrado
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                             {conversacion.unreadCount > 0 && (
@@ -279,37 +379,86 @@ export default function ConversacionesPage() {
                     <section className="relative bg-white/30 flex flex-col min-h-0 overflow-hidden">
                         {conversacionActiva ? (
                             <>
-                                <div className="px-6 py-4 border-b border-surface-800/20 bg-white/70 flex flex-wrap items-center justify-between gap-4">
-                                    <div>
-                                        <p className="text-sm font-semibold text-surface-100">{conversacionActiva.nombre}</p>
-                                        <div className="flex items-center gap-3 text-xs text-surface-400 mt-1">
-                                            <span className="flex items-center gap-1">
-                                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                                Conversación activa
-                                            </span>
-                                            <span className="px-2 py-0.5 rounded-full bg-surface-900 text-surface-200">
-                                                {conversacionActiva.canal}
-                                            </span>
-                                            <span
-                                                className={`px-2 py-0.5 rounded-full ${
-                                                    ultimoEstadoIntervencion === "activo"
-                                                        ? "bg-emerald-500/15 text-emerald-700"
-                                                        : "bg-surface-900/10 text-surface-500"
+                                <div className="px-6 py-4 border-b border-surface-800/20 bg-white/70 space-y-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-4">
+                                        <div>
+                                            <p className="text-sm font-semibold text-surface-100">{conversacionActiva.nombre}</p>
+                                            <div className="flex flex-wrap items-center gap-3 text-xs text-surface-400 mt-1">
+                                                <span className="flex items-center gap-1">
+                                                    <span
+                                                        className={`h-2 w-2 rounded-full ${
+                                                            conversacionActiva.estado === "cerrado"
+                                                                ? "bg-surface-400"
+                                                                : "bg-emerald-500"
+                                                        }`}
+                                                    />
+                                                    {conversacionActiva.estado === "cerrado"
+                                                        ? "Conversación cerrada"
+                                                        : "Conversación activa"}
+                                                </span>
+                                                <span className="px-2 py-0.5 rounded-full bg-surface-900 text-surface-200">
+                                                    {conversacionActiva.canal}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2 text-xs">
+                                            <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
+                                                Programar
+                                            </button>
+                                            <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
+                                                Etiquetar
+                                            </button>
+                                            <button
+                                                onClick={handleCerrarChat}
+                                                disabled={closingChat || conversacionActiva.estado === "cerrado"}
+                                                className={`px-3 py-2 rounded-md text-white ${
+                                                    closingChat || conversacionActiva.estado === "cerrado"
+                                                        ? "bg-primary-500/60 cursor-not-allowed"
+                                                        : "bg-primary-500 hover:bg-primary-600"
                                                 }`}
                                             >
-                                                Intervención {ultimoEstadoIntervencion === "activo" ? "activa" : "inactiva"}
-                                            </span>
+                                                {conversacionActiva.estado === "cerrado"
+                                                    ? "Chat cerrado"
+                                                    : closingChat
+                                                        ? "Cerrando..."
+                                                        : "Cerrar chat"}
+                                            </button>
                                         </div>
                                     </div>
-                                    <div className="flex gap-2 text-xs">
-                                        <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
-                                            Programar
-                                        </button>
-                                        <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
-                                            Etiquetar
-                                        </button>
-                                        <button className="px-3 py-2 bg-primary-500 text-white rounded-md">Cerrar chat</button>
+                                    <div className="flex flex-wrap gap-3 text-xs">
+                                        <div className="flex items-center justify-between gap-4 rounded-2xl border border-surface-800/20 bg-white px-3 py-2 min-w-[220px]">
+                                            <div>
+                                                <p className="text-[10px] uppercase tracking-[0.2em] text-surface-500">Bot IA</p>
+                                                <p className="text-sm font-semibold text-surface-100">
+                                                    {botActivo ? "En espera" : "Desactivado"}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleToggleBot}
+                                                disabled={updatingBot || conversacionActiva.estado === "cerrado"}
+                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                                    botActivo ? "bg-emerald-500" : "bg-surface-700"
+                                                } ${
+                                                    updatingBot || conversacionActiva.estado === "cerrado"
+                                                        ? "opacity-60 cursor-not-allowed"
+                                                        : "cursor-pointer"
+                                                }`}
+                                                aria-label="Activar o desactivar bot"
+                                            >
+                                                <span
+                                                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                                        botActivo ? "translate-x-5" : "translate-x-1"
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
                                     </div>
+                                    {actionError && (
+                                        <div className="text-[11px] text-primary-600 bg-primary-500/10 border border-primary-500/30 rounded-md px-3 py-2">
+                                            {actionError}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20 min-h-0">
@@ -372,16 +521,24 @@ export default function ConversacionesPage() {
                                 <div className="border-t border-surface-800/20 bg-white/70 p-4">
                                     <div className="flex gap-3">
                                         <input
-                                            className="flex-1 input-field bg-white"
+                                            value={draftMessage}
+                                            onChange={(e) => setDraftMessage(e.target.value)}
+                                            className={`flex-1 input-field ${
+                                                inputBloqueado ? "bg-surface-100 text-surface-500" : "bg-white"
+                                            }`}
                                             placeholder={`Escribe un mensaje para ${conversacionActiva.nombre}`}
-                                            disabled
+                                            disabled={inputBloqueado}
                                         />
-                                        <button className="btn-primary whitespace-nowrap" disabled>
+                                        <button className="btn-primary whitespace-nowrap" disabled={inputBloqueado}>
                                             Enviar
                                         </button>
                                     </div>
                                     <p className="text-[11px] text-surface-400 mt-2">
-                                        El envío se habilitará cuando conectemos la API de salida.
+                                        {conversacionActiva.estado === "cerrado"
+                                            ? "Este chat está cerrado."
+                                            : botActivo
+                                                ? "Bot IA activo: desactívalo para responder manualmente."
+                                                : "Modo manual activo: ya puedes escribir."}
                                     </p>
                                 </div>
                             </>
@@ -401,9 +558,9 @@ export default function ConversacionesPage() {
                                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                                         </svg>
                                     </div>
-                                    <h3 className="text-xl font-semibold text-surface-100">Aún no hay chats</h3>
+                                    <h3 className="text-xl font-semibold text-surface-100">Selecciona una conversación</h3>
                                     <p className="text-sm text-surface-500 mt-2">
-                                        En cuanto llegue el primer mensaje desde Meta aparecerá aquí.
+                                        Elige un contacto del panel izquierdo para ver su chat.
                                     </p>
                                 </div>
                             </div>
