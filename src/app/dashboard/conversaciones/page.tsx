@@ -1,49 +1,154 @@
 "use client";
-import { useMemo, useState } from "react";
 
-interface Conversacion {
-    id: number;
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+type FiltroCanal = "Todos" | "WhatsApp" | "Instagram" | "Web";
+
+interface ConversationSummary {
+    waId: string;
     nombre: string;
-    ultimoMensaje: string;
-    hora: string;
-    noLeidos: number;
+    canal: string;
+    lastMessage: string | null;
+    lastMessageAt: string | null;
+    unreadCount: number;
 }
 
-const CONVERSACIONES: Conversacion[] = [
-    { id: 1, nombre: "Erik Taveras", ultimoMensaje: "Generando respuesta para tu pedido.", hora: "ahora", noLeidos: 1 },
-    { id: 2, nombre: "Carlos", ultimoMensaje: "Hola Carlos, te hablo por el pedido de hoy.", hora: "00:24", noLeidos: 0 },
-    { id: 3, nombre: "Jairo", ultimoMensaje: "Gracias por tu interés en Juan Pastel.", hora: "ayer", noLeidos: 1 },
-    { id: 4, nombre: "Yukata Yokoyama", ultimoMensaje: "¡Genial! Te envío la información completa.", hora: "ayer", noLeidos: 1 },
-    { id: 5, nombre: "Brian Jose Lopez Silva", ultimoMensaje: "Con gusto, ¿me confirmas la sede?", hora: "ayer", noLeidos: 1 },
-    { id: 6, nombre: "Raysa Taveras", ultimoMensaje: "¡Hola! ¿Cómo estás? Si necesitas apoyo, aquí estoy.", hora: "ayer", noLeidos: 1 },
-];
+interface ConversationMessage {
+    messageId: string;
+    direction: "inbound" | "outbound";
+    body: string | null;
+    timestamp: string;
+}
+
+const FILTROS: FiltroCanal[] = ["Todos", "WhatsApp", "Instagram", "Web"];
+
+function formatRelative(dateInput?: string | null) {
+    if (!dateInput) return "";
+    const date = new Date(dateInput);
+    if (Number.isNaN(date.getTime())) return "";
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const dayMs = 1000 * 60 * 60 * 24;
+    if (diff < dayMs && date.getDate() === now.getDate()) {
+        return date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    }
+    if (diff < dayMs * 2) return "ayer";
+    return date.toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
+}
+
+function formatHour(dateInput?: string | null) {
+    if (!dateInput) return "";
+    const date = new Date(dateInput);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function ConversacionesPage() {
+    const [conversaciones, setConversaciones] = useState<ConversationSummary[]>([]);
+    const [mensajes, setMensajes] = useState<ConversationMessage[]>([]);
     const [busqueda, setBusqueda] = useState("");
-    const [seleccionada, setSeleccionada] = useState<number | null>(null);
+    const [filtro, setFiltro] = useState<FiltroCanal>("Todos");
+    const [seleccionada, setSeleccionada] = useState<string | null>(null);
+    const [loadingConvs, setLoadingConvs] = useState(true);
+    const [loadingMensajes, setLoadingMensajes] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchConversaciones = useCallback(
+        async (silent = false) => {
+            try {
+                if (!silent) setLoadingConvs(true);
+                const query = filtro !== "Todos" ? `?canal=${encodeURIComponent(filtro)}` : "";
+                const res = await fetch(`/api/conversaciones${query}`, { cache: "no-store" });
+                if (!res.ok) throw new Error("Error cargando conversaciones");
+                const data = await res.json();
+                setConversaciones(data.conversations || []);
+                setError(null);
+            } catch (err) {
+                console.error("[Conversaciones] Fetch error", err);
+                setError("No pudimos cargar las conversaciones");
+            } finally {
+                if (!silent) setLoadingConvs(false);
+            }
+        },
+        [filtro]
+    );
+
+    const fetchMensajes = useCallback(
+        async (waId: string) => {
+            try {
+                setLoadingMensajes(true);
+                const res = await fetch(`/api/conversaciones/${waId}`, { cache: "no-store" });
+                if (!res.ok) throw new Error("Error cargando mensajes");
+                const data = await res.json();
+                setMensajes(data.messages || []);
+                await fetch(`/api/conversaciones/${waId}`, { method: "PATCH" });
+                fetchConversaciones(true);
+            } catch (err) {
+                console.error("[Conversaciones] Mensajes error", err);
+            } finally {
+                setLoadingMensajes(false);
+            }
+        },
+        [fetchConversaciones]
+    );
+
+    const handleSeleccion = useCallback(
+        (waId: string) => {
+            setSeleccionada(waId);
+            fetchMensajes(waId);
+        },
+        [fetchMensajes]
+    );
+
+    useEffect(() => {
+        fetchConversaciones();
+        const interval = setInterval(() => fetchConversaciones(true), 5000);
+        return () => clearInterval(interval);
+    }, [fetchConversaciones]);
+
+    useEffect(() => {
+        if (!conversaciones.length) {
+            setSeleccionada(null);
+            setMensajes([]);
+            return;
+        }
+        if (seleccionada && conversaciones.some((c) => c.waId === seleccionada)) return;
+        handleSeleccion(conversaciones[0].waId);
+    }, [conversaciones, seleccionada, handleSeleccion]);
 
     const conversacionesFiltradas = useMemo(() => {
         const term = busqueda.trim().toLowerCase();
-        if (!term) return CONVERSACIONES;
-        return CONVERSACIONES.filter((c) =>
-            c.nombre.toLowerCase().includes(term) || c.ultimoMensaje.toLowerCase().includes(term)
+        if (!term) return conversaciones;
+        return conversaciones.filter(
+            (c) =>
+                c.nombre.toLowerCase().includes(term) ||
+                (c.lastMessage?.toLowerCase().includes(term) ?? false)
         );
-    }, [busqueda]);
+    }, [busqueda, conversaciones]);
+
+    const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
 
     return (
         <div className="space-y-6">
             <div className="animate-in">
-                <h1 className="text-2xl font-bold text-surface-50">Conversaciones</h1>
-                <p className="text-surface-400 text-sm mt-1">Centro de chats con clientes</p>
+                <h1 className="text-3xl font-bold text-surface-50">Conversaciones</h1>
+                <p className="text-surface-400 text-sm mt-1">
+                    Recibe y responde mensajes de Meta en tiempo real.
+                </p>
             </div>
 
-            <div className="glass-card overflow-hidden min-h-[70vh] animate-in" style={{ animationDelay: "100ms" }}>
+            <div className="glass-card overflow-hidden animate-in" style={{ animationDelay: "100ms" }}>
                 <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-[70vh]">
-                    <aside className="border-r border-surface-800/30 bg-white/40">
-                        <div className="p-4 border-b border-surface-800/20 space-y-3">
+                    <aside className="border-r border-surface-800/30 bg-white/50">
+                        <div className="p-4 border-b border-surface-800/20 space-y-4">
                             <div className="flex items-center justify-between">
-                                <h2 className="text-sm font-semibold text-surface-100">Chats</h2>
-                                <span className="text-xs text-surface-500">{conversacionesFiltradas.length}</span>
+                                <div>
+                                    <p className="text-xs uppercase tracking-[0.2em] text-surface-500">Chats</p>
+                                    <h2 className="text-lg font-semibold text-surface-100">
+                                        {loadingConvs ? "Cargando..." : `${conversacionesFiltradas.length} activos`}
+                                    </h2>
+                                </div>
+                                <span className="text-[11px] text-surface-400">Actualiza cada 5s</span>
                             </div>
 
                             <div className="relative">
@@ -54,7 +159,7 @@ export default function ConversacionesPage() {
                                     fill="none"
                                     stroke="currentColor"
                                     strokeWidth="2"
-                                    className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500"
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400"
                                 >
                                     <circle cx="11" cy="11" r="8" />
                                     <path d="m21 21-4.3-4.3" />
@@ -63,34 +168,75 @@ export default function ConversacionesPage() {
                                     value={busqueda}
                                     onChange={(e) => setBusqueda(e.target.value)}
                                     className="input-field pl-9 text-sm"
-                                    placeholder="Buscar por nombre o mensaje..."
+                                    placeholder="Buscar por nombre o mensaje"
                                 />
+                            </div>
+
+                            <div className="flex gap-2 overflow-x-auto text-xs">
+                                {FILTROS.map((opcion) => (
+                                    <button
+                                        key={opcion}
+                                        onClick={() => setFiltro(opcion)}
+                                        className={`px-3 py-1.5 rounded-full border text-[11px] ${
+                                            filtro === opcion
+                                                ? "bg-primary-500 text-white border-primary-500"
+                                                : "border-surface-800/30 text-surface-400"
+                                        }`}
+                                    >
+                                        {opcion}
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
-                        <div className="divide-y divide-surface-800/20">
+                        {error && (
+                            <div className="px-4 py-3 text-xs text-primary-600 bg-primary-500/10 border border-primary-500/30">
+                                {error}
+                            </div>
+                        )}
+
+                        <div className="divide-y divide-surface-800/15 max-h-[62vh] overflow-y-auto">
                             {conversacionesFiltradas.map((conversacion) => {
-                                const activo = seleccionada === conversacion.id;
+                                const activo = seleccionada === conversacion.waId;
                                 return (
                                     <button
-                                        key={conversacion.id}
-                                        onClick={() => setSeleccionada(conversacion.id)}
-                                        className={`w-full text-left px-4 py-3 transition-colors ${activo ? "bg-primary-500/10" : "hover:bg-primary-500/5"}`}
+                                        key={conversacion.waId}
+                                        onClick={() => handleSeleccion(conversacion.waId)}
+                                        className={`w-full text-left px-4 py-3 transition ${
+                                            activo ? "bg-primary-500/10" : "hover:bg-primary-500/5"
+                                        }`}
                                     >
                                         <div className="flex items-start gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">
-                                                {conversacion.nombre.charAt(0).toUpperCase()}
+                                            <div className="w-9 h-9 rounded-full bg-surface-900 text-surface-50 text-xs font-bold flex items-center justify-center uppercase">
+                                                {conversacion.nombre
+                                                    .split(" ")
+                                                    .filter(Boolean)
+                                                    .slice(0, 2)
+                                                    .map((n) => n[0])
+                                                    .join("")}
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center justify-between gap-2">
-                                                    <p className="text-sm font-semibold text-surface-100 truncate">{conversacion.nombre}</p>
-                                                    <span className="text-[10px] text-surface-500 shrink-0">{conversacion.hora}</span>
+                                                    <p className="text-sm font-semibold text-surface-100 truncate">
+                                                        {conversacion.nombre}
+                                                    </p>
+                                                    <span className="text-[10px] text-surface-500 shrink-0">
+                                                        {formatRelative(conversacion.lastMessageAt)}
+                                                    </span>
                                                 </div>
-                                                <p className="text-xs text-surface-500 truncate mt-0.5">Tú: {conversacion.ultimoMensaje}</p>
+                                                <p className="text-xs text-surface-400 truncate">
+                                                    {conversacion.lastMessage || "Sin mensajes"}
+                                                </p>
+                                                <div className="mt-2 flex items-center gap-2 text-[10px] text-surface-500">
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                        {conversacion.canal}
+                                                    </span>
+                                                </div>
                                             </div>
-                                            {conversacion.noLeidos > 0 && (
-                                                <span className="shrink-0 w-5 h-5 rounded-full bg-primary-500/20 text-primary-600 text-[10px] font-bold flex items-center justify-center">
-                                                    {conversacion.noLeidos}
+                                            {conversacion.unreadCount > 0 && (
+                                                <span className="shrink-0 w-5 h-5 rounded-full bg-primary-500 text-white text-[10px] font-semibold flex items-center justify-center">
+                                                    {conversacion.unreadCount}
                                                 </span>
                                             )}
                                         </div>
@@ -98,39 +244,112 @@ export default function ConversacionesPage() {
                                 );
                             })}
 
-                            {conversacionesFiltradas.length === 0 && (
+                            {!loadingConvs && conversacionesFiltradas.length === 0 && (
                                 <div className="p-6 text-center text-surface-500 text-sm">
-                                    No se encontraron conversaciones
+                                    Aún no hay conversaciones.
                                 </div>
                             )}
                         </div>
                     </aside>
 
-                    <section className="relative bg-white/30">
-                        {seleccionada ? (
-                            <div className="h-full flex flex-col">
-                                <div className="px-6 py-4 border-b border-surface-800/20 bg-white/40">
-                                    <p className="text-sm font-semibold text-surface-100">
-                                        {CONVERSACIONES.find((c) => c.id === seleccionada)?.nombre}
-                                    </p>
-                                    <p className="text-xs text-surface-500">Conversación activa</p>
-                                </div>
-                                <div className="flex-1 p-6 flex items-center justify-center">
-                                    <div className="text-center text-surface-500">
-                                        <p className="text-sm">Vista de conversación lista para integrar mensajes reales.</p>
+                    <section className="relative bg-white/30 flex flex-col">
+                        {conversacionActiva ? (
+                            <>
+                                <div className="px-6 py-4 border-b border-surface-800/20 bg-white/70 flex flex-wrap items-center justify-between gap-4">
+                                    <div>
+                                        <p className="text-sm font-semibold text-surface-100">{conversacionActiva.nombre}</p>
+                                        <div className="flex items-center gap-3 text-xs text-surface-400 mt-1">
+                                            <span className="flex items-center gap-1">
+                                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                Conversación activa
+                                            </span>
+                                            <span className="px-2 py-0.5 rounded-full bg-surface-900 text-surface-200">
+                                                {conversacionActiva.canal}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 text-xs">
+                                        <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
+                                            Programar
+                                        </button>
+                                        <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
+                                            Etiquetar
+                                        </button>
+                                        <button className="px-3 py-2 bg-primary-500 text-white rounded-md">Cerrar chat</button>
                                     </div>
                                 </div>
-                            </div>
+
+                                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20">
+                                    {loadingMensajes && (
+                                        <div className="text-center text-xs text-surface-400">Cargando mensajes...</div>
+                                    )}
+                                    {mensajes.map((mensaje) => (
+                                        <div
+                                            key={mensaje.messageId}
+                                            className={`flex ${mensaje.direction === "outbound" ? "justify-end" : "justify-start"}`}
+                                        >
+                                            <div
+                                                className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                                                    mensaje.direction === "outbound"
+                                                        ? "bg-primary-500 text-white"
+                                                        : "bg-white border border-surface-800/15 text-surface-100"
+                                                }`}
+                                            >
+                                                <p>{mensaje.body || "Mensaje sin texto"}</p>
+                                                <p
+                                                    className={`mt-1 text-[10px] ${
+                                                        mensaje.direction === "outbound" ? "text-white/70" : "text-surface-400"
+                                                    }`}
+                                                >
+                                                    {formatHour(mensaje.timestamp)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {!loadingMensajes && mensajes.length === 0 && (
+                                        <div className="text-center text-surface-400 text-sm py-12">
+                                            Aún no hay mensajes registrados para este contacto.
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="border-t border-surface-800/20 bg-white/70 p-4">
+                                    <div className="flex gap-3">
+                                        <input
+                                            className="flex-1 input-field bg-white"
+                                            placeholder={`Escribe un mensaje para ${conversacionActiva.nombre}`}
+                                            disabled
+                                        />
+                                        <button className="btn-primary whitespace-nowrap" disabled>
+                                            Enviar
+                                        </button>
+                                    </div>
+                                    <p className="text-[11px] text-surface-400 mt-2">
+                                        El envío se habilitará cuando conectemos la API de salida.
+                                    </p>
+                                </div>
+                            </>
                         ) : (
                             <div className="h-full flex items-center justify-center p-8">
                                 <div className="text-center">
                                     <div className="w-20 h-20 rounded-2xl bg-surface-800/60 flex items-center justify-center mx-auto mb-4">
-                                        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="text-surface-500">
+                                        <svg
+                                            width="34"
+                                            height="34"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.7"
+                                            className="text-surface-500"
+                                        >
                                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                                         </svg>
                                     </div>
-                                    <h3 className="text-xl font-semibold text-surface-100">Selecciona una conversación</h3>
-                                    <p className="text-sm text-surface-500 mt-2">Elige un contacto para ver su conversación.</p>
+                                    <h3 className="text-xl font-semibold text-surface-100">Aún no hay chats</h3>
+                                    <p className="text-sm text-surface-500 mt-2">
+                                        En cuanto llegue el primer mensaje desde Meta aparecerá aquí.
+                                    </p>
                                 </div>
                             </div>
                         )}

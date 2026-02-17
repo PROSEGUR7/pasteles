@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { fireWebhook } from "@/lib/webhook";
+import { persistMetaWebhookPayload } from "@/lib/metaStore";
 
 export const runtime = "nodejs";
 
@@ -82,6 +83,12 @@ export async function POST(request: NextRequest) {
         }
 
         console.log("[Meta Webhook] Payload recibido:", JSON.stringify(payload));
+
+        try {
+            await persistMetaWebhookPayload(payload);
+        } catch (persistError) {
+            console.error("[Meta Webhook] Persist error:", persistError);
+        }
 
         await fireWebhook({
             provider: "meta-whatsapp",
