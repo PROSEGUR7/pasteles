@@ -55,6 +55,19 @@ async function shouldTranscodeAudio(file: File) {
     const normalized = normalizeMimeType(mime);
     const name = (file.name || "").toLowerCase();
 
+    try {
+        const headBuffer = Buffer.from(await file.slice(0, 64).arrayBuffer());
+        const container = sniffAudioContainer(headBuffer);
+
+        // Only skip transcoding when it's already MP3.
+        if (container === "mp3") return false;
+
+        // Otherwise, convert everything else to MP3 for maximum compatibility.
+        return true;
+    } catch {
+        // If sniffing fails, fallback to heuristics and default to transcoding.
+    }
+
     if (mime.includes("codecs=")) return true;
     if (normalized !== mime && normalized.startsWith("audio/")) return true;
     if (name.endsWith(".webm") || name.endsWith(".m4a") || name.endsWith(".mp4") || name.endsWith(".opus")) {
@@ -62,30 +75,14 @@ async function shouldTranscodeAudio(file: File) {
     }
     if (mime.includes("webm") || mime.includes("mp4") || mime.includes("opus")) return true;
 
-    // If the file is mislabeled (common with MediaRecorder), detect by magic bytes.
-    try {
-        const headBuffer = Buffer.from(await file.slice(0, 64).arrayBuffer());
-        const container = sniffAudioContainer(headBuffer);
-
-        // Only skip transcoding when it's a real OGG container.
-        if (container === "ogg") return false;
-
-        // WebM/MP4 are frequently accepted by upload but not reliably delivered as voice notes.
-        if (container === "webm" || container === "mp4") return true;
-
-        // Unknown -> transcode to be safe.
-        if (container === "unknown") return true;
-    } catch {
-        // If sniffing fails, keep existing heuristic result.
-    }
-
-    return false;
+    // Even if the browser claims it's mpeg/mp3, we couldn't sniff it; transcode to be safe.
+    return true;
 }
 
-async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
+async function transcodeAudioToMp3(inputFile: File): Promise<File> {
     if (!ffmpegPath) {
         throw new Error(
-            "No hay ffmpeg disponible para convertir audio. Sube el audio como archivo (.mp3/.ogg/.m4a). (HTTP 400)"
+            "No hay ffmpeg disponible para convertir audio. Sube el audio como archivo (.mp3). (HTTP 400)"
         );
     }
 
@@ -93,7 +90,7 @@ async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
 
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), "pasteles-audio-"));
     const inPath = path.join(tmpDir, "input.bin");
-    const outPath = path.join(tmpDir, "output.ogg");
+    const outPath = path.join(tmpDir, "output.mp3");
 
     try {
         const buffer = Buffer.from(await inputFile.arrayBuffer());
@@ -108,11 +105,13 @@ async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
                     inPath,
                     "-vn",
                     "-c:a",
-                    "libopus",
+                    "libmp3lame",
                     "-b:a",
-                    "24k",
-                    "-vbr",
-                    "on",
+                    "64k",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "48000",
                     outPath,
                 ],
                 (error, _stdout, stderr) => {
@@ -126,8 +125,8 @@ async function transcodeAudioToOggOpus(inputFile: File): Promise<File> {
             );
         });
 
-        const oggBuffer = await readFile(outPath);
-        return new File([oggBuffer], `audio-${Date.now()}.ogg`, { type: "audio/ogg" });
+        const mp3Buffer = await readFile(outPath);
+        return new File([mp3Buffer], `audio-${Date.now()}.mp3`, { type: "audio/mpeg" });
     } finally {
         await rm(tmpDir, { recursive: true, force: true }).catch(() => null);
     }
@@ -181,7 +180,7 @@ export async function POST(request: NextRequest) {
                 type === "audio" &&
                 (await shouldTranscodeAudio(file))
             ) {
-                uploadFile = await transcodeAudioToOggOpus(file);
+                uploadFile = await transcodeAudioToMp3(file);
             }
 
             uploadFile = await sanitizeFileForMetaUpload(uploadFile);
@@ -195,7 +194,7 @@ export async function POST(request: NextRequest) {
 
             const previewBody =
                 type === "audio"
-                    ? `🎵 Audio (${uploadFile.name || file.name || "sin nombre"})`
+                    ? "🎵 Audio"
                     : (caption || `📷 Imagen (${file.name || "sin nombre"})`);
 
             await persistOutboundMetaMessage({

@@ -50,11 +50,13 @@ export async function GET(_request: NextRequest, { params }: Params) {
             return NextResponse.json({ error: message }, { status: metaInfoRes.status || 502 });
         }
 
-        const mediaRes = await fetch(metaInfo.url, {
+        const downloadUrl = new URL(metaInfo.url);
+        if (!downloadUrl.searchParams.has("access_token")) {
+            downloadUrl.searchParams.set("access_token", token);
+        }
+
+        const mediaRes = await fetch(downloadUrl.toString(), {
             method: "GET",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
             cache: "no-store",
         });
 

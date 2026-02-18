@@ -1,6 +1,16 @@
 "use client";
 
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    Fragment,
+    type Dispatch,
+    type ReactNode,
+    type SetStateAction,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 
 type FiltroCanal = "Todos" | "No leídos";
 
@@ -62,6 +72,16 @@ function getSenderBadgeClass(senderType: ConversationMessage["senderType"]) {
     if (senderType === "humano") return "bg-blue-500/15 text-blue-700";
     if (senderType === "cliente") return "bg-surface-900/10 text-surface-500";
     return "bg-violet-500/15 text-violet-700";
+}
+
+function formatPhoneFromWaId(waId: string) {
+    const digits = (waId || "").replace(/\D/g, "");
+    if (!digits) return "";
+
+    const local = digits.length > 10 ? digits.slice(-10) : digits;
+    const country = digits.length > 10 ? digits.slice(0, -10) : "";
+    const parts = local.length === 10 ? [local.slice(0, 3), local.slice(3, 6), local.slice(6)] : [local];
+    return `${country ? `+${country} ` : ""}${parts.join(" ")}`.trim();
 }
 
 function renderInlineSegments(segment: string) {
@@ -135,6 +155,174 @@ function renderMessageBody(text: string) {
     });
 }
 
+function isGenericAudioLabel(text: string | null | undefined) {
+    const value = (text || "").trim();
+    if (!value) return true;
+    return (
+        /^🎵\s*audio\b/i.test(value) ||
+        /^\s*audio\b/i.test(value) ||
+        /\baudio\s*\([^)]*\.(m4a|mp3|ogg|opus|webm)\)/i.test(value)
+    );
+}
+
+function formatAudioDuration(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
+    const total = Math.floor(seconds);
+    const minutes = Math.floor(total / 60);
+    const remainder = total % 60;
+    return `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
+interface AudioMessagePlayerProps {
+    messageId: string;
+    audioUrl: string;
+    isOutbound: boolean;
+    timestampLabel: string;
+    activeAudioId: string | null;
+    setActiveAudioId: Dispatch<SetStateAction<string | null>>;
+}
+
+function AudioMessagePlayer({
+    messageId,
+    audioUrl,
+    isOutbound,
+    timestampLabel,
+    activeAudioId,
+    setActiveAudioId,
+}: AudioMessagePlayerProps) {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const audioElement = audioRef.current;
+        if (!audioElement) return;
+
+        const handleTimeUpdate = () => setCurrentTime(audioElement.currentTime || 0);
+        const handleLoadedMetadata = () => {
+            if (Number.isFinite(audioElement.duration)) {
+                setDuration(audioElement.duration);
+            }
+        };
+        const handleEnded = () => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+            setActiveAudioId((prev) => (prev === messageId ? null : prev));
+        };
+        const handlePause = () => setIsPlaying(false);
+        const handlePlay = () => setIsPlaying(true);
+
+        audioElement.addEventListener("timeupdate", handleTimeUpdate);
+        audioElement.addEventListener("loadedmetadata", handleLoadedMetadata);
+        audioElement.addEventListener("ended", handleEnded);
+        audioElement.addEventListener("pause", handlePause);
+        audioElement.addEventListener("play", handlePlay);
+
+        return () => {
+            audioElement.removeEventListener("timeupdate", handleTimeUpdate);
+            audioElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
+            audioElement.removeEventListener("ended", handleEnded);
+            audioElement.removeEventListener("pause", handlePause);
+            audioElement.removeEventListener("play", handlePlay);
+        };
+    }, [messageId, setActiveAudioId]);
+
+    useEffect(() => {
+        const audioElement = audioRef.current;
+        if (!audioElement) return;
+        if (activeAudioId !== messageId && !audioElement.paused) {
+            audioElement.pause();
+            audioElement.currentTime = 0;
+            setCurrentTime(0);
+        }
+    }, [activeAudioId, messageId]);
+
+    useEffect(() => {
+        const audioElement = audioRef.current;
+        if (!audioElement) return;
+        audioElement.pause();
+        audioElement.currentTime = 0;
+        audioElement.load();
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setDuration(0);
+        setPlaybackError(null);
+        setActiveAudioId((prev) => (prev === messageId ? null : prev));
+    }, [audioUrl, messageId, setActiveAudioId]);
+
+    const togglePlayback = () => {
+        const audioElement = audioRef.current;
+        if (!audioElement) return;
+        setPlaybackError(null);
+        if (audioElement.paused) {
+            audioElement
+                .play()
+                .then(() => {
+                    setIsPlaying(true);
+                    setActiveAudioId(messageId);
+                })
+                .catch((error) => {
+                    setIsPlaying(false);
+                    setActiveAudioId((prev) => (prev === messageId ? null : prev));
+                    setPlaybackError("No pudimos reproducir este audio");
+                    console.error("Audio playback error", error);
+                });
+        } else {
+            audioElement.pause();
+            setActiveAudioId((prev) => (prev === messageId ? null : prev));
+        }
+    };
+
+    const progress = duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
+    const durationLabel = formatAudioDuration(isPlaying ? currentTime : duration || currentTime);
+    const playButtonClass = isOutbound
+        ? "bg-white/20 border-white/40 text-white hover:bg-white/30"
+        : "bg-white border-surface-800/20 text-primary-600 hover:border-primary-400";
+    const trackClass = isOutbound ? "bg-white/20" : "bg-surface-800/15";
+    const fillClass = isOutbound ? "bg-white" : "bg-primary-500";
+    const metaTextClass = isOutbound ? "text-white/80" : "text-surface-500";
+
+    return (
+        <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+                <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" />
+                <button
+                type="button"
+                onClick={togglePlayback}
+                aria-label={isPlaying ? "Pausar audio" : "Reproducir audio"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full border transition focus:outline-none focus:ring-2 focus:ring-primary-500/40 ${playButtonClass}`}
+            >
+                {isPlaying ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M10 7v10M14 7v10" strokeLinecap="round" />
+                    </svg>
+                ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                )}
+                </button>
+                <div className="flex-1 space-y-1">
+                    <div className={`h-1.5 w-full rounded-full overflow-hidden ${trackClass}`}>
+                        <div className={`h-full rounded-full ${fillClass}`} style={{ width: `${progress}%` }} />
+                    </div>
+                    <div className={`flex items-center justify-between text-[11px] font-semibold tracking-tight ${metaTextClass}`}>
+                        <span className="tabular-nums">{durationLabel}</span>
+                        <span className="tabular-nums">{timestampLabel}</span>
+                    </div>
+                </div>
+            </div>
+            {playbackError ? (
+                <p className={`text-[11px] font-medium ${isOutbound ? "text-white/80" : "text-primary-600"}`}>
+                    {playbackError}
+                </p>
+            ) : null}
+        </div>
+    );
+}
+
 export default function ConversacionesPage() {
     const [conversaciones, setConversaciones] = useState<ConversationSummary[]>([]);
     const [mensajes, setMensajes] = useState<ConversationMessage[]>([]);
@@ -154,8 +342,11 @@ export default function ConversacionesPage() {
     const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState<string | null>(null);
     const [imagePreviewByMessageId, setImagePreviewByMessageId] = useState<Record<string, string>>({});
     const [brokenImageByMessageId, setBrokenImageByMessageId] = useState<Record<string, boolean>>({});
+    const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+    const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
     const imageInputRef = useRef<HTMLInputElement | null>(null);
     const audioInputRef = useRef<HTMLInputElement | null>(null);
+    const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
     const messagesContainerRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -223,6 +414,24 @@ export default function ConversacionesPage() {
     const conversacionActiva = conversaciones.find((c) => c.waId === seleccionada) || null;
     const botActivo = conversacionActiva?.botStatus === "activo";
     const inputBloqueado = !conversacionActiva || botActivo;
+
+    useEffect(() => {
+        if (!showAttachmentOptions) return;
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as Node | null;
+            if (attachmentMenuRef.current && target && !attachmentMenuRef.current.contains(target)) {
+                setShowAttachmentOptions(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [showAttachmentOptions]);
+
+    useEffect(() => {
+        if (inputBloqueado && showAttachmentOptions) {
+            setShowAttachmentOptions(false);
+        }
+    }, [inputBloqueado, showAttachmentOptions]);
 
     const handleCerrarChat = useCallback(async () => {
         if (!seleccionada || closingChat) return;
@@ -606,6 +815,29 @@ export default function ConversacionesPage() {
         }
     }, [inputBloqueado, sendingMessage, recordingAudio, sendMediaFile]);
 
+    const handleAttachmentAction = useCallback(
+        (option: "image" | "audio" | "record") => {
+            if (inputBloqueado || sendingMessage) return;
+            setShowAttachmentOptions(false);
+            if (option === "image") {
+                handleSeleccionarImagen();
+                return;
+            }
+            if (option === "audio") {
+                handleSeleccionarAudio();
+                return;
+            }
+            handleAudioDesdeMicrofono();
+        },
+        [
+            handleAudioDesdeMicrofono,
+            handleSeleccionarAudio,
+            handleSeleccionarImagen,
+            inputBloqueado,
+            sendingMessage,
+        ]
+    );
+
     useEffect(() => {
         fetchConversaciones();
         const interval = setInterval(() => fetchConversaciones(true), 5000);
@@ -675,10 +907,15 @@ export default function ConversacionesPage() {
         const term = busqueda.trim().toLowerCase();
         if (!term) return result;
 
+        const termDigits = term.replace(/\D/g, "");
+
         return result.filter(
             (c) =>
                 c.nombre.toLowerCase().includes(term) ||
-                (c.lastMessage?.toLowerCase().includes(term) ?? false)
+                (c.lastMessage?.toLowerCase().includes(term) ?? false) ||
+                (termDigits
+                    ? c.waId.replace(/\D/g, "").includes(termDigits)
+                    : c.waId.toLowerCase().includes(term))
         );
     }, [busqueda, conversaciones, filtro]);
 
@@ -695,7 +932,6 @@ export default function ConversacionesPage() {
                                         {loadingConvs ? "Cargando..." : `${conversacionesFiltradas.length} activos`}
                                     </h2>
                                 </div>
-                                <span className="text-[11px] text-surface-400">Actualiza cada 5s</span>
                             </div>
 
                             <div className="relative">
@@ -715,7 +951,7 @@ export default function ConversacionesPage() {
                                     value={busqueda}
                                     onChange={(e) => setBusqueda(e.target.value)}
                                     className="input-field pl-9 text-sm"
-                                    placeholder="Buscar por nombre o mensaje"
+                                    placeholder="Buscar por nombre o teléfono"
                                 />
                             </div>
 
@@ -745,6 +981,11 @@ export default function ConversacionesPage() {
                         <div className="divide-y divide-surface-800/15 flex-1 overflow-y-auto min-h-0">
                             {conversacionesFiltradas.map((conversacion) => {
                                 const activo = seleccionada === conversacion.waId;
+                                const lastMessagePreview = conversacion.lastMessage
+                                    ? isGenericAudioLabel(conversacion.lastMessage)
+                                        ? "Audio"
+                                        : conversacion.lastMessage
+                                    : "Sin mensajes";
                                 return (
                                     <button
                                         key={conversacion.waId}
@@ -772,7 +1013,7 @@ export default function ConversacionesPage() {
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-surface-400 truncate">
-                                                    {conversacion.lastMessage || "Sin mensajes"}
+                                                    {lastMessagePreview}
                                                 </p>
                                                 <div className="mt-2 flex items-center gap-2 text-[10px] text-surface-500">
                                                     <span className="inline-flex items-center gap-1">
@@ -820,32 +1061,46 @@ export default function ConversacionesPage() {
                                 <div className="px-6 py-4 border-b border-surface-800/20 bg-white/70 space-y-4">
                                     <div className="flex flex-wrap items-center justify-between gap-4">
                                         <div>
-                                            <p className="text-sm font-semibold text-surface-100">{conversacionActiva.nombre}</p>
-                                            <div className="flex flex-wrap items-center gap-3 text-xs text-surface-400 mt-1">
-                                                <span className="flex items-center gap-1">
-                                                    <span
-                                                        className={`h-2 w-2 rounded-full ${
-                                                            conversacionActiva.estado === "cerrado"
-                                                                ? "bg-surface-400"
-                                                                : "bg-emerald-500"
-                                                        }`}
-                                                    />
-                                                    {conversacionActiva.estado === "cerrado"
-                                                        ? "Conversación cerrada"
-                                                        : "Conversación activa"}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <p className="text-sm font-semibold text-surface-100">{conversacionActiva.nombre}</p>
+                                                <span className="text-xs text-surface-400">
+                                                    {formatPhoneFromWaId(conversacionActiva.waId)}
                                                 </span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-3 text-xs text-surface-400 mt-1">
                                                 <span className="px-2 py-0.5 rounded-full bg-surface-900 text-surface-200">
                                                     {conversacionActiva.canal}
                                                 </span>
                                             </div>
                                         </div>
                                         <div className="flex gap-2 text-xs">
-                                            <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
-                                                Programar
-                                            </button>
-                                            <button className="px-3 py-2 border border-surface-800/30 rounded-md text-surface-400">
-                                                Etiquetar
-                                            </button>
+                                            <div className="flex items-center justify-between gap-4 rounded-2xl border border-surface-800/20 bg-white px-3 py-2 min-w-[220px]">
+                                                <div>
+                                                    <p className="text-[10px] uppercase tracking-[0.2em] text-surface-500">Bot IA</p>
+                                                    <p className="text-sm font-semibold text-surface-100">
+                                                        {botActivo ? "En espera" : "Desactivado"}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleToggleBot}
+                                                    disabled={updatingBot}
+                                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                                        botActivo ? "bg-emerald-500" : "bg-surface-700"
+                                                    } ${
+                                                        updatingBot
+                                                            ? "opacity-60 cursor-not-allowed"
+                                                            : "cursor-pointer"
+                                                    }`}
+                                                    aria-label="Activar o desactivar bot"
+                                                >
+                                                    <span
+                                                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                                            botActivo ? "translate-x-5" : "translate-x-1"
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
                                             <button
                                                 onClick={handleCerrarChat}
                                                 disabled={closingChat}
@@ -855,40 +1110,7 @@ export default function ConversacionesPage() {
                                                         : "bg-primary-500 hover:bg-primary-600"
                                                 }`}
                                             >
-                                                {conversacionActiva.estado === "cerrado"
-                                                    ? "Quitar selección"
-                                                    : closingChat
-                                                        ? "Cerrando..."
-                                                        : "Cerrar chat"}
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-3 text-xs">
-                                        <div className="flex items-center justify-between gap-4 rounded-2xl border border-surface-800/20 bg-white px-3 py-2 min-w-[220px]">
-                                            <div>
-                                                <p className="text-[10px] uppercase tracking-[0.2em] text-surface-500">Bot IA</p>
-                                                <p className="text-sm font-semibold text-surface-100">
-                                                    {botActivo ? "En espera" : "Desactivado"}
-                                                </p>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={handleToggleBot}
-                                                disabled={updatingBot}
-                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                                    botActivo ? "bg-emerald-500" : "bg-surface-700"
-                                                } ${
-                                                    updatingBot
-                                                        ? "opacity-60 cursor-not-allowed"
-                                                        : "cursor-pointer"
-                                                }`}
-                                                aria-label="Activar o desactivar bot"
-                                            >
-                                                <span
-                                                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                                                        botActivo ? "translate-x-5" : "translate-x-1"
-                                                    }`}
-                                                />
+                                                {closingChat ? "Cerrando..." : "Cerrar chat"}
                                             </button>
                                         </div>
                                     </div>
@@ -901,7 +1123,14 @@ export default function ConversacionesPage() {
 
                                 <div
                                     ref={messagesContainerRef}
-                                    className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white/20 min-h-0"
+                                    className="flex-1 overflow-y-auto px-6 py-5 space-y-4 min-h-0"
+                                    style={{
+                                        backgroundColor: "#fbfbfb",
+                                        backgroundImage: "url('/images/chat-bg.png')",
+                                        backgroundSize: "cover",
+                                        backgroundPosition: "center",
+                                        backgroundRepeat: "no-repeat",
+                                    }}
                                 >
                                     {loadingMensajes && (
                                         <div className="text-center text-xs text-surface-400">Cargando mensajes...</div>
@@ -927,9 +1156,20 @@ export default function ConversacionesPage() {
                                                     /\baudio\s*\([^)]*\.(m4a|mp3|ogg|opus|webm)\)/i.test(bodyText);
                                                 const audioUrl = isAudio ? remoteMediaUrl : null;
                                                 const imageFailed = Boolean(brokenImageByMessageId[mensaje.messageId]);
+
+                                                const bubbleSizeClass = isAudio
+                                                    ? "max-w-[85%] px-5 py-4"
+                                                    : "max-w-[75%] px-4 py-3";
+                                                const hourLabel = formatHour(mensaje.timestamp);
+                                                const defaultMetaLabel = hourLabel
+                                                    ? `${hourLabel} · ${mensaje.source.toUpperCase()}`
+                                                    : mensaje.source.toUpperCase();
+                                                const footerLabel = isAudio && audioUrl
+                                                    ? mensaje.source.toUpperCase()
+                                                    : defaultMetaLabel;
                                                 return (
                                             <div
-                                                className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                                                className={`${bubbleSizeClass} rounded-2xl text-sm shadow-sm ${
                                                     mensaje.direction === "outbound"
                                                         ? "bg-primary-500 text-white"
                                                         : "bg-white border border-surface-800/15 text-surface-100"
@@ -982,33 +1222,42 @@ export default function ConversacionesPage() {
                                                     </div>
                                                 ) : isAudio ? (
                                                     <div className="space-y-2">
-                                                        <audio
-                                                            controls
-                                                            preload="none"
-                                                            src={audioUrl || undefined}
-                                                            className="w-full max-w-[320px]"
-                                                        />
-                                                        {!audioUrl ? (
+                                                        {audioUrl ? (
+                                                            <AudioMessagePlayer
+                                                                messageId={mensaje.messageId}
+                                                                audioUrl={audioUrl}
+                                                                isOutbound={mensaje.direction === "outbound"}
+                                                                timestampLabel={hourLabel || "--:--"}
+                                                                activeAudioId={activeAudioId}
+                                                                setActiveAudioId={setActiveAudioId}
+                                                            />
+                                                        ) : (
                                                             <p className="text-[11px] opacity-80">
                                                                 Audio sin URL reproducible en este mensaje.
                                                             </p>
+                                                        )}
+                                                        {!isGenericAudioLabel(mensaje.body) ? (
+                                                            <div className="whitespace-pre-wrap break-words leading-relaxed">
+                                                                {renderMessageBody(mensaje.body || "")}
+                                                            </div>
                                                         ) : null}
-                                                        <div className="whitespace-pre-wrap break-words leading-relaxed">
-                                                            {mensaje.body ? renderMessageBody(mensaje.body) : "🎵 Audio"}
-                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <div className="whitespace-pre-wrap break-words leading-relaxed">
                                                         {mensaje.body ? renderMessageBody(mensaje.body) : "Mensaje sin texto"}
                                                     </div>
                                                 )}
-                                                <p
-                                                    className={`mt-1 text-[10px] ${
-                                                        mensaje.direction === "outbound" ? "text-white/70" : "text-surface-400"
-                                                    }`}
-                                                >
-                                                    {formatHour(mensaje.timestamp)} · {mensaje.source.toUpperCase()}
-                                                </p>
+                                                {footerLabel ? (
+                                                    <p
+                                                        className={`mt-1 text-[10px] ${
+                                                            mensaje.direction === "outbound"
+                                                                ? "text-white/70"
+                                                                : "text-surface-400"
+                                                        }`}
+                                                    >
+                                                        {footerLabel}
+                                                    </p>
+                                                ) : null}
                                             </div>
                                                 );
                                             })()}
@@ -1047,7 +1296,7 @@ export default function ConversacionesPage() {
                                             </div>
                                         </div>
                                     )}
-                                    <div className="flex gap-3">
+                                    <div className="flex gap-3 items-start">
                                         <input
                                             ref={imageInputRef}
                                             type="file"
@@ -1062,6 +1311,52 @@ export default function ConversacionesPage() {
                                             className="hidden"
                                             onChange={handleAudioSeleccionado}
                                         />
+                                        <div className="relative" ref={attachmentMenuRef}>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (inputBloqueado || sendingMessage) return;
+                                                    setShowAttachmentOptions((prev) => !prev);
+                                                }}
+                                                className={`h-11 w-11 rounded-2xl border text-lg font-semibold transition ${
+                                                    inputBloqueado || sendingMessage
+                                                        ? "border-surface-800/20 text-surface-300 cursor-not-allowed"
+                                                        : "border-surface-800/30 text-surface-500 hover:text-primary-500"
+                                                }`}
+                                                disabled={inputBloqueado || sendingMessage}
+                                                aria-label="Opciones de adjunto"
+                                            >
+                                                +
+                                            </button>
+                                            {showAttachmentOptions ? (
+                                                <div className="absolute bottom-[calc(100%+0.75rem)] left-0 z-20 w-44 rounded-2xl border border-surface-800/20 bg-white/95 shadow-2xl backdrop-blur px-2 py-3 space-y-1">
+                                                    <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-surface-400">
+                                                        Adjuntar
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAttachmentAction("image")}
+                                                        className="w-full rounded-xl px-3 py-2 text-left text-sm text-surface-500 hover:bg-surface-900/20"
+                                                    >
+                                                        Imagen
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAttachmentAction("audio")}
+                                                        className="w-full rounded-xl px-3 py-2 text-left text-sm text-surface-500 hover:bg-surface-900/20"
+                                                    >
+                                                        Audio
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAttachmentAction("record")}
+                                                        className="w-full rounded-xl px-3 py-2 text-left text-sm text-surface-500 hover:bg-surface-900/20"
+                                                    >
+                                                        {recordingAudio ? "Detener grabación" : "Grabar"}
+                                                    </button>
+                                                </div>
+                                            ) : null}
+                                        </div>
                                         <input
                                             value={draftMessage}
                                             onChange={(e) => setDraftMessage(e.target.value)}
@@ -1077,30 +1372,6 @@ export default function ConversacionesPage() {
                                             placeholder={`Escribe un mensaje para ${conversacionActiva.nombre}`}
                                             disabled={inputBloqueado}
                                         />
-                                        <button
-                                            onClick={handleSeleccionarImagen}
-                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            disabled={inputBloqueado || sendingMessage}
-                                            title="Seleccionar imagen"
-                                        >
-                                            Imagen
-                                        </button>
-                                        <button
-                                            onClick={handleSeleccionarAudio}
-                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            disabled={inputBloqueado || sendingMessage}
-                                            title="Seleccionar archivo de audio"
-                                        >
-                                            Audio
-                                        </button>
-                                        <button
-                                            onClick={handleAudioDesdeMicrofono}
-                                            className="px-3 py-2 rounded-md border border-surface-800/30 text-xs text-surface-500 hover:text-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            disabled={inputBloqueado || sendingMessage}
-                                            title={recordingAudio ? "Detener y enviar audio" : "Grabar con micrófono"}
-                                        >
-                                            {recordingAudio ? "Detener" : "Grabar"}
-                                        </button>
                                         <button
                                             onClick={handleEnviarMensaje}
                                             className="btn-primary whitespace-nowrap"
