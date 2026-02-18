@@ -23,18 +23,20 @@ export async function GET() {
                         c.id_cliente,
                         c.nombre,
                         c.telefono,
+                        c.estado,
                         REGEXP_REPLACE(COALESCE(c.telefono, ''), '\\D', '', 'g') AS telefono_digits,
                         COUNT(p.id_pedido) AS total_pedidos,
                         COALESCE(SUM(CASE WHEN p.estado = 'cancelado' THEN 1 ELSE 0 END), 0) AS pedidos_cancelados,
                         MAX(p.fecha) AS ultimo_pedido
                     FROM clientes c
                     LEFT JOIN pedidos p ON p.id_cliente = c.id_cliente
-                    GROUP BY c.id_cliente, c.nombre, c.telefono
+                    GROUP BY c.id_cliente, c.nombre, c.telefono, c.estado
                 )
                 SELECT
                     b.id_cliente,
                     b.nombre,
                     b.telefono,
+                    b.estado,
                     b.total_pedidos,
                     b.pedidos_cancelados,
                     b.ultimo_pedido,
@@ -94,9 +96,11 @@ export async function GET() {
             pedidosCancelados: Number(row.pedidos_cancelados || 0),
             ultimoPedido: row.ultimo_pedido ? new Date(row.ultimo_pedido).toISOString() : null,
             botStatus:
-                row.bot_status === "activo" || row.bot_status === "inactivo"
-                    ? (row.bot_status as "activo" | "inactivo")
-                    : null,
+                row.estado === "activo" || row.estado === "inactivo"
+                    ? (row.estado as "activo" | "inactivo")
+                    : row.bot_status === "activo" || row.bot_status === "inactivo"
+                        ? (row.bot_status as "activo" | "inactivo")
+                        : null,
         }));
 
         return NextResponse.json({ clientes });

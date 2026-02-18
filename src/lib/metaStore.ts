@@ -273,16 +273,54 @@ export async function listMetaConversations(canal?: string): Promise<Conversatio
         params
     );
 
-    return result.rows.map((row) => ({
-        waId: row.wa_id,
-        nombre: row.nombre,
-        canal: row.canal,
-        lastMessage: row.last_message,
-        lastMessageAt: row.last_message_at,
-        unreadCount: Number(row.unread_count || 0),
-        estado: (row.estado as "abierto" | "cerrado") || "abierto",
-        botStatus: (row.bot_status as "activo" | "inactivo") || "activo",
-    }));
+    const waLast10 = result.rows
+        .map((row) => String(row.wa_id || "").replace(/\D/g, ""))
+        .map((digits) => (digits.length > 10 ? digits.slice(-10) : digits))
+        .filter(Boolean);
+
+    const botStatusByLast10 = new Map<string, "activo" | "inactivo">();
+    if (waLast10.length) {
+        try {
+            const clientesResult = await pool.query(
+                `SELECT DISTINCT ON (RIGHT(REGEXP_REPLACE(COALESCE(telefono, ''), '\\D', '', 'g'), 10))
+                    RIGHT(REGEXP_REPLACE(COALESCE(telefono, ''), '\\D', '', 'g'), 10) AS last10,
+                    estado
+                 FROM clientes
+                 WHERE RIGHT(REGEXP_REPLACE(COALESCE(telefono, ''), '\\D', '', 'g'), 10) = ANY($1::text[])
+                 ORDER BY RIGHT(REGEXP_REPLACE(COALESCE(telefono, ''), '\\D', '', 'g'), 10), id_cliente DESC;`,
+                [waLast10]
+            );
+
+            for (const row of clientesResult.rows) {
+                const last10 = String(row.last10 || "");
+                const estado = String(row.estado || "").toLowerCase();
+                if (!last10) continue;
+                if (estado === "activo" || estado === "inactivo") {
+                    botStatusByLast10.set(last10, estado as "activo" | "inactivo");
+                }
+            }
+        } catch {
+            // If clientes table isn't available or the query fails, fallback to meta_conversations.bot_status.
+        }
+    }
+
+    return result.rows.map((row) => {
+        const waDigits = String(row.wa_id || "").replace(/\D/g, "");
+        const last10 = waDigits.length > 10 ? waDigits.slice(-10) : waDigits;
+        const fallbackStatus = (row.bot_status as "activo" | "inactivo") || "activo";
+        const botStatus = botStatusByLast10.get(last10) || fallbackStatus;
+
+        return {
+            waId: row.wa_id,
+            nombre: row.nombre,
+            canal: row.canal,
+            lastMessage: row.last_message,
+            lastMessageAt: row.last_message_at,
+            unreadCount: Number(row.unread_count || 0),
+            estado: (row.estado as "abierto" | "cerrado") || "abierto",
+            botStatus,
+        };
+    });
 }
 
 export async function getMetaConversationMessages(waId: string): Promise<ConversationMessage[]> {

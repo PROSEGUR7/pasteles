@@ -150,10 +150,6 @@ function isAuthorized(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
-        if (!isAuthorized(request)) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         const contentType = request.headers.get("content-type") || "";
 
         if (contentType.includes("multipart/form-data")) {
@@ -166,6 +162,10 @@ export async function POST(request: NextRequest) {
             const source = String(form.get("source") || "dashboard") as "n8n" | "dashboard" | "meta";
             const caption = String(form.get("caption") || "").trim();
             const file = form.get("file");
+
+            if (source !== "dashboard" && !isAuthorized(request)) {
+                return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            }
 
             if (!waId) {
                 return NextResponse.json({ error: "waId/to es requerido" }, { status: 400 });
@@ -241,6 +241,12 @@ export async function POST(request: NextRequest) {
             source?: "n8n" | "dashboard" | "meta";
         };
 
+        const source = body.source || "n8n";
+
+        if (source !== "dashboard" && !isAuthorized(request)) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
                 const waId = (body.waId || body.to || body.phone || "").trim();
                 const message = (body.mensaje || body.message || body.text || body.body || "").trim();
                 const imageUrl = (body.urlImagen || body.imageUrl || body.mediaUrl || "").trim();
@@ -267,7 +273,6 @@ export async function POST(request: NextRequest) {
         }
 
         const senderType = body.senderType || body.remitente || body.sender || "ia";
-        const source = body.source || "n8n";
 
         let resolvedType: "text" | "image" | "audio" = type;
         let warning: string | null = null;

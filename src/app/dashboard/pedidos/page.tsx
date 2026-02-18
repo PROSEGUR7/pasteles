@@ -70,6 +70,7 @@ export default function PedidosPage() {
     const [detalleOpen, setDetalleOpen] = useState(false);
     const [updatingEstado, setUpdatingEstado] = useState<number | null>(null);
     const [menuAccionesAbierto, setMenuAccionesAbierto] = useState<number | null>(null);
+    const [menuEstadoAbierto, setMenuEstadoAbierto] = useState<number | null>(null);
     const [cancelAlert, setCancelAlert] = useState<CancelAlert | null>(null);
     const pedidosEstadoPrevioRef = useRef<Map<number, string>>(new Map());
     const inicializadoRef = useRef(false);
@@ -179,6 +180,9 @@ export default function PedidosPage() {
             const target = event.target as Element | null;
             if (!target?.closest("[data-acciones-container='true']")) {
                 setMenuAccionesAbierto(null);
+            }
+            if (!target?.closest("[data-estado-container='true']")) {
+                setMenuEstadoAbierto(null);
             }
         };
 
@@ -337,7 +341,44 @@ export default function PedidosPage() {
                                         </td>
                                         <td className="py-3.5 px-5 text-sm text-surface-400">{p.sede_nombre || "—"}</td>
                                         <td className="py-3.5 px-5">
-                                            <span className={`badge badge-${p.estado}`}>{p.estado}</span>
+                                            <div className="relative inline-block" data-estado-container="true">
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setMenuEstadoAbierto(menuEstadoAbierto === p.id_pedido ? null : p.id_pedido)
+                                                    }
+                                                    className="inline-flex items-center gap-1.5 rounded-full pr-1 hover:bg-primary-500/10 transition-colors"
+                                                    aria-label="Cambiar estado"
+                                                >
+                                                    <span className={`badge badge-${p.estado}`}>{p.estado}</span>
+                                                    <svg
+                                                        width="14"
+                                                        height="14"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="2"
+                                                        className="text-surface-500"
+                                                    >
+                                                        <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                </button>
+
+                                                {menuEstadoAbierto === p.id_pedido && (
+                                                    <div className="absolute left-0 mt-1 w-44 glass-card-light p-1.5 z-20 border border-surface-800/40">
+                                                        {ESTADOS.map((estado) => (
+                                                            <button
+                                                                key={estado}
+                                                                onClick={() => cambiarEstado(p.id_pedido, estado)}
+                                                                disabled={updatingEstado === p.id_pedido || estado === p.estado}
+                                                                className="w-full text-left px-3 py-2 rounded-md text-xs text-surface-300 hover:bg-primary-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors capitalize"
+                                                            >
+                                                                {estado}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="py-3.5 px-5 text-sm font-semibold text-surface-200 text-right">{formatCOP(parseFloat(p.total))}</td>
                                         <td className="py-3.5 px-5 text-sm text-surface-500 text-right">
@@ -368,17 +409,6 @@ export default function PedidosPage() {
                                                         >
                                                             Ver detalle
                                                         </button>
-
-                                                        {ESTADOS.map((estado) => (
-                                                            <button
-                                                                key={estado}
-                                                                onClick={() => cambiarEstado(p.id_pedido, estado)}
-                                                                disabled={updatingEstado === p.id_pedido || estado === p.estado}
-                                                                className="w-full text-left px-3 py-2 rounded-md text-xs text-surface-300 hover:bg-primary-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                                            >
-                                                                Marcar como {estado}
-                                                            </button>
-                                                        ))}
                                                     </div>
                                                 )}
                                             </div>

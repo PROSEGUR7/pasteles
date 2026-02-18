@@ -165,6 +165,21 @@ function isGenericAudioLabel(text: string | null | undefined) {
     );
 }
 
+function isAuthErrorJson(text: string) {
+    const value = (text || "").trim();
+    if (!value) return false;
+    if (!(value.startsWith("{") && value.endsWith("}"))) return false;
+    try {
+        const parsed = JSON.parse(value) as Record<string, unknown>;
+        const status = typeof parsed.status === "number" ? parsed.status : Number(parsed.status);
+        const title = typeof parsed.title === "string" ? parsed.title : "";
+        const detail = typeof parsed.detail === "string" ? parsed.detail : "";
+        return status === 401 && /(authentication\s*error|authenticationerror)/i.test(`${title} ${detail}`.trim());
+    } catch {
+        return false;
+    }
+}
+
 function formatAudioDuration(seconds: number) {
     if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
     const total = Math.floor(seconds);
@@ -263,10 +278,48 @@ function AudioMessagePlayer({
                     setIsPlaying(true);
                     setActiveAudioId(messageId);
                 })
-                .catch((error) => {
+                .catch(async (error) => {
                     setIsPlaying(false);
                     setActiveAudioId((prev) => (prev === messageId ? null : prev));
-                    setPlaybackError("No pudimos reproducir este audio");
+                    let nextMessage = "No pudimos reproducir este audio";
+
+                    const errorName = error && typeof error === "object" && "name" in error
+                        ? String((error as { name?: unknown }).name)
+                        : "";
+
+                    if (errorName === "NotSupportedError") {
+                        try {
+                            const controller = new AbortController();
+                            const res = await fetch(audioUrl, { cache: "no-store", signal: controller.signal });
+                            const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+                            if (!res.ok) {
+                                if (res.status === 401) {
+                                    nextMessage = "No autorizado (401). Revisa el token de Meta y reinicia el servidor.";
+                                } else {
+                                    nextMessage = `No se pudo cargar el audio (HTTP ${res.status}).`;
+                                }
+                                if (contentType.includes("application/json")) {
+                                    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+                                    if (data?.error) nextMessage = data.error;
+                                }
+                            } else if (!contentType.startsWith("audio/")) {
+                                nextMessage = "El servidor no devolvió un audio reproducible.";
+                            }
+
+                            try {
+                                await res.body?.cancel();
+                            } catch {
+                                // ignore
+                            }
+
+                            controller.abort();
+                        } catch {
+                            // ignore probing errors
+                        }
+                    }
+
+                    setPlaybackError(nextMessage);
                     console.error("Audio playback error", error);
                 });
         } else {
@@ -350,6 +403,7 @@ export default function ConversacionesPage() {
     const messagesContainerRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
+    const lastMessageSyncRef = useRef<Record<string, string | null>>({});
 
     const fetchConversaciones = useCallback(
         async (silent = false) => {
@@ -384,9 +438,10 @@ export default function ConversacionesPage() {
     );
 
     const fetchMensajes = useCallback(
-        async (waId: string) => {
+        async (waId: string, options?: { silent?: boolean }) => {
+            const showLoading = !options?.silent;
             try {
-                setLoadingMensajes(true);
+                if (showLoading) setLoadingMensajes(true);
                 const encodedWaId = encodeURIComponent(waId);
                 const res = await fetch(`/api/conversaciones/${encodedWaId}`, { cache: "no-store" });
                 if (!res.ok) throw new Error("Error cargando mensajes");
@@ -395,9 +450,11 @@ export default function ConversacionesPage() {
                 await fetch(`/api/conversaciones/${encodedWaId}`, { method: "PATCH" });
                 fetchConversaciones(true);
             } catch (err) {
-                console.error("[Conversaciones] Mensajes error", err);
+                if (!options?.silent) {
+                    console.error("[Conversaciones] Mensajes error", err);
+                }
             } finally {
-                setLoadingMensajes(false);
+                if (showLoading) setLoadingMensajes(false);
             }
         },
         [fetchConversaciones]
@@ -514,12 +571,13 @@ export default function ConversacionesPage() {
                 prev.map((c) =>
                     c.waId === conversacionActiva.waId
                         ? {
-                            ...c,
-                            botStatus: nextStatus,
-                        }
+                              ...c,
+                              botStatus: nextStatus,
+                          }
                         : c
                 )
             );
+            fetchConversaciones(true);
         } catch (err) {
             console.error("[Conversaciones] Toggle bot", err);
             setActionError(
@@ -530,7 +588,7 @@ export default function ConversacionesPage() {
         } finally {
             setUpdatingBot(false);
         }
-    }, [conversacionActiva, updatingBot]);
+    }, [conversacionActiva, updatingBot, fetchConversaciones]);
 
     const handleLimpiarAdjuntoImagen = useCallback(() => {
         setSelectedImageFile(null);
@@ -818,15 +876,17 @@ export default function ConversacionesPage() {
     const handleAttachmentAction = useCallback(
         (option: "image" | "audio" | "record") => {
             if (inputBloqueado || sendingMessage) return;
-            setShowAttachmentOptions(false);
             if (option === "image") {
+                setShowAttachmentOptions(false);
                 handleSeleccionarImagen();
                 return;
             }
             if (option === "audio") {
+                setShowAttachmentOptions(false);
                 handleSeleccionarAudio();
                 return;
             }
+            // Keep the menu open while recording so users can see the active state and stop.
             handleAudioDesdeMicrofono();
         },
         [
@@ -843,6 +903,24 @@ export default function ConversacionesPage() {
         const interval = setInterval(() => fetchConversaciones(true), 5000);
         return () => clearInterval(interval);
     }, [fetchConversaciones]);
+
+    useEffect(() => {
+        if (!seleccionada) return;
+        const interval = setInterval(() => {
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+            fetchMensajes(seleccionada, { silent: true });
+        }, 4000);
+        return () => clearInterval(interval);
+    }, [seleccionada, fetchMensajes]);
+
+    useEffect(() => {
+        if (!conversacionActiva) return;
+        const waId = conversacionActiva.waId;
+        const lastAt = conversacionActiva.lastMessageAt || null;
+        if (lastMessageSyncRef.current[waId] === lastAt) return;
+        lastMessageSyncRef.current[waId] = lastAt;
+        fetchMensajes(waId, { silent: true });
+    }, [conversacionActiva?.waId, conversacionActiva?.lastMessageAt, fetchMensajes]);
 
     useEffect(() => {
         if (!conversaciones.length) {
@@ -1078,7 +1156,7 @@ export default function ConversacionesPage() {
                                                 <div>
                                                     <p className="text-[10px] uppercase tracking-[0.2em] text-surface-500">Bot IA</p>
                                                     <p className="text-sm font-semibold text-surface-100">
-                                                        {botActivo ? "En espera" : "Desactivado"}
+                                                        {botActivo ? "Activado" : "Desactivado"}
                                                     </p>
                                                 </div>
                                                 <button
@@ -1142,6 +1220,7 @@ export default function ConversacionesPage() {
                                         >
                                             {(() => {
                                                 const bodyText = (mensaje.body || "").trim();
+                                                if (isAuthErrorJson(bodyText)) return null;
                                                 const previewUrl = imagePreviewByMessageId[mensaje.messageId];
                                                 const remoteMediaUrl = mensaje.mediaUrl || null;
                                                 const imageUrl = remoteMediaUrl || previewUrl;
@@ -1161,12 +1240,12 @@ export default function ConversacionesPage() {
                                                     ? "max-w-[85%] px-5 py-4"
                                                     : "max-w-[75%] px-4 py-3";
                                                 const hourLabel = formatHour(mensaje.timestamp);
-                                                const defaultMetaLabel = hourLabel
-                                                    ? `${hourLabel} · ${mensaje.source.toUpperCase()}`
-                                                    : mensaje.source.toUpperCase();
-                                                const footerLabel = isAudio && audioUrl
-                                                    ? mensaje.source.toUpperCase()
-                                                    : defaultMetaLabel;
+                                                const footerLabel = hourLabel;
+                                                const showSenderChip = !(
+                                                    mensaje.direction === "inbound" && mensaje.senderType === "cliente"
+                                                );
+                                                const showInterventionChip = Boolean(mensaje.interventionStatus);
+                                                const showHeaderRow = showSenderChip || showInterventionChip;
                                                 return (
                                             <div
                                                 className={`${bubbleSizeClass} rounded-2xl text-sm shadow-sm ${
@@ -1175,28 +1254,32 @@ export default function ConversacionesPage() {
                                                         : "bg-white border border-surface-800/15 text-surface-100"
                                                 }`}
                                             >
-                                                <div className="mb-1.5 flex items-center gap-2">
-                                                    <span
-                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                            mensaje.direction === "outbound"
-                                                                ? "bg-white/20 text-white"
-                                                                : getSenderBadgeClass(mensaje.senderType)
-                                                        }`}
-                                                    >
-                                                        {getSenderLabel(mensaje.senderType)}
-                                                    </span>
-                                                    {mensaje.interventionStatus && (
-                                                        <span
-                                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                                mensaje.interventionStatus === "activo"
-                                                                    ? "bg-emerald-500/15 text-emerald-700"
-                                                                    : "bg-surface-900/10 text-surface-500"
-                                                            }`}
-                                                        >
-                                                            {mensaje.interventionStatus === "activo" ? "Activo" : "Inactivo"}
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                {showHeaderRow ? (
+                                                    <div className="mb-1.5 flex items-center gap-2">
+                                                        {showSenderChip ? (
+                                                            <span
+                                                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                                    mensaje.direction === "outbound"
+                                                                        ? "bg-white/20 text-white"
+                                                                        : getSenderBadgeClass(mensaje.senderType)
+                                                                }`}
+                                                            >
+                                                                {getSenderLabel(mensaje.senderType)}
+                                                            </span>
+                                                        ) : null}
+                                                        {showInterventionChip ? (
+                                                            <span
+                                                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                                    mensaje.interventionStatus === "activo"
+                                                                        ? "bg-emerald-500/15 text-emerald-700"
+                                                                        : "bg-surface-900/10 text-surface-500"
+                                                                }`}
+                                                            >
+                                                                {mensaje.interventionStatus === "activo" ? "Activo" : "Inactivo"}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
                                                 {isImage && imageUrl && !imageFailed ? (
                                                     <div className="space-y-2">
                                                         <img
@@ -1236,7 +1319,7 @@ export default function ConversacionesPage() {
                                                                 Audio sin URL reproducible en este mensaje.
                                                             </p>
                                                         )}
-                                                        {!isGenericAudioLabel(mensaje.body) ? (
+                                                        {!isGenericAudioLabel(mensaje.body) && !isAuthErrorJson((mensaje.body || "").trim()) ? (
                                                             <div className="whitespace-pre-wrap break-words leading-relaxed">
                                                                 {renderMessageBody(mensaje.body || "")}
                                                             </div>
