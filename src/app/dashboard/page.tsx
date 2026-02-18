@@ -309,7 +309,11 @@ export default function DashboardPage() {
                     </div>
                 ) : (
                     <div className="text-center py-8 text-surface-500">
-                        <p className="text-sm">Sin datos de productos vendidos aún</p>
+                        <p className="text-sm">
+                            {stats.ventasTotal.pedidos > 0
+                                ? "Tus pedidos no tienen detalle de productos (pedido_detalle está vacío)."
+                                : "Sin datos de productos vendidos aún"}
+                        </p>
                     </div>
                 )}
             </div>
